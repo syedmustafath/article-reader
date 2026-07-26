@@ -247,6 +247,13 @@ function bindChunk(c) {
                              .sort((a, b) => a.time - b.time);
 }
 
+// Status line under the player: "Part 2 of 44 · <message>".
+function updateNote(msg) {
+  const total = CHUNKS.length;
+  const part = total > 1 && playing >= 0 ? `Part ${playing + 1} of ${total}` : '';
+  $('#note').textContent = [part, msg].filter(Boolean).join(' · ');
+}
+
 // Initial play / seek target (runs inside a user gesture, so await+play is fine).
 async function playFrom(i, seekTime = 0) {
   if (i < 0 || i >= CHUNKS.length) return;
