@@ -1,0 +1,12 @@
+# Render Blueprint — deploy with one click from the connected GitHub repo.
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: natural-voice-reader
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
