@@ -2,69 +2,104 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Natural Voice Reader</title>
 <style>
   :root {
-    --bg: #f7f5f0; --panel: #fffdf8; --ink: #23201b; --muted: #6b655c;
-    --accent: #c8621a; --hl: #ffe6b8; --hl-ink: #3a2a0a; --line: #e6e1d6;
+    --bg: #ffffff; --panel: #ffffff; --ink: #1a1a1c; --muted: #8a8a8f;
+    --accent: #e0662a; --hl: #ffe08a; --hl-ink: #402c00; --line: #ececef;
+    --chip: #f4f4f6; --sheet: #ffffff;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #16150f; --panel: #211f18; --ink: #ece7dc; --muted: #9a9385;
-      --accent: #e8974a; --hl: #5a4413; --hl-ink: #fff3d6; --line: #34322a;
+      --bg: #0f0f11; --panel: #17171a; --ink: #f1f1f3; --muted: #8e8e94;
+      --accent: #f0783c; --hl: #5a4413; --hl-ink: #ffe9b3; --line: #2a2a2e;
+      --chip: #242428; --sheet: #1b1b1f;
     }
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; background: var(--bg); color: var(--ink);
          font-family: -apple-system, system-ui, sans-serif; line-height: 1.6; }
   header { position: sticky; top: 0; z-index: 10; background: var(--panel);
-           border-bottom: 1px solid var(--line); padding: 12px 20px; }
+           border-bottom: 1px solid var(--line); padding: 12px 16px;
+           padding-top: max(12px, env(safe-area-inset-top)); }
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
          max-width: 780px; margin: 0 auto; }
   input[type=url], textarea {
-    flex: 1 1 280px; min-width: 200px; padding: 9px 12px; border: 1px solid var(--line);
-    border-radius: 9px; background: var(--bg); color: var(--ink); font-size: 15px; }
+    flex: 1 1 240px; min-width: 160px; padding: 11px 13px; border: 1px solid var(--line);
+    border-radius: 11px; background: var(--bg); color: var(--ink); font-size: 16px; }
   textarea { width: 100%; resize: vertical; min-height: 90px; font-family: inherit; }
-  select, button {
-    padding: 9px 14px; border: 1px solid var(--line); border-radius: 9px;
-    background: var(--bg); color: var(--ink); font-size: 14px; cursor: pointer; }
+  button { font-family: inherit; cursor: pointer; border: 1px solid var(--line);
+           background: var(--bg); color: var(--ink); border-radius: 11px;
+           padding: 11px 16px; font-size: 15px; }
   button.primary { background: var(--accent); color: #fff; border-color: var(--accent);
                    font-weight: 600; }
   button:disabled { opacity: .5; cursor: default; }
-  .link { background: none; border: none; color: var(--accent); padding: 4px;
-          font-size: 13px; text-decoration: underline; }
-  main { max-width: 720px; margin: 0 auto; padding: 28px 22px 160px; }
-  #title { font-size: 30px; font-weight: 700; line-height: 1.25; margin: 0 0 20px; }
-  #article { font-family: Georgia, 'Times New Roman', serif; font-size: 20px; line-height: 1.75; }
-  #article p { margin: 0 0 1.1em; }
-  .w { border-radius: 4px; cursor: pointer; transition: background .08s; }
-  .w.active { background: var(--hl); color: var(--hl-ink); box-shadow: 0 0 0 3px var(--hl); }
+  .icon { width: 44px; padding: 0; height: 44px; font-size: 19px; flex: none;
+          display: flex; align-items: center; justify-content: center; }
+  .link { background: none; border: none; color: var(--accent); padding: 6px 4px;
+          font-size: 14px; text-decoration: underline; }
+  main { max-width: 720px; margin: 0 auto; padding: 26px 20px 170px; }
+  #title { font-family: -apple-system, system-ui, sans-serif; font-size: 27px;
+           font-weight: 800; line-height: 1.22; margin: 0 0 22px; letter-spacing: -.01em; }
+  #article { font-family: Georgia, 'Times New Roman', serif; font-size: 20px; line-height: 1.78; }
+  #article p { margin: 0 0 1.15em; }
+  .w { border-radius: 5px; cursor: pointer; transition: background .08s; }
+  .w.active { background: var(--hl); color: var(--hl-ink);
+              box-shadow: 0 0 0 3px var(--hl); }
   #status { color: var(--muted); font-size: 15px; padding: 40px 0; text-align: center; }
   #status.err { color: #d0402a; }
+
   .player { position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel);
-            border-top: 1px solid var(--line); padding: 12px 20px; display: none;
-            box-shadow: 0 -6px 20px rgba(0,0,0,.06); }
+            border-top: 1px solid var(--line); padding: 12px 16px;
+            padding-bottom: max(12px, env(safe-area-inset-bottom)); display: none;
+            box-shadow: 0 -6px 22px rgba(0,0,0,.07); }
   .player.on { display: block; }
   .player .inner { max-width: 780px; margin: 0 auto; width: 100%;
-                   display: flex; align-items: center; gap: 14px; }
-  #play { width: 48px; height: 48px; border-radius: 50%; font-size: 18px; flex: none;
+                   display: flex; align-items: center; gap: 12px; }
+  #play { width: 52px; height: 52px; border-radius: 50%; font-size: 19px; flex: none;
           display: flex; align-items: center; justify-content: center; }
-  #seek { flex: 1; accent-color: var(--accent); }
+  #seek { flex: 1; accent-color: var(--accent); height: 26px; }
   #time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px;
-          flex: none; min-width: 78px; text-align: right; }
-  .speed { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
-  #note { max-width: 780px; margin: 6px auto 0; text-align: center; color: var(--muted);
+          flex: none; min-width: 42px; }
+  #speedChip { flex: none; background: var(--chip); border-color: transparent;
+               padding: 9px 13px; font-size: 14px; font-weight: 600;
+               font-variant-numeric: tabular-nums; }
+  #note { max-width: 780px; margin: 7px auto 0; text-align: center; color: var(--muted);
           font-size: 12px; min-height: 15px; }
+
+  /* Bottom sheet */
+  .sheetbg { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 20;
+             opacity: 0; pointer-events: none; transition: opacity .2s; }
+  .sheetbg.open { opacity: 1; pointer-events: auto; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21;
+           background: var(--sheet); border-radius: 20px 20px 0 0;
+           padding: 8px 20px max(20px, env(safe-area-inset-bottom));
+           transform: translateY(110%); transition: transform .25s ease;
+           box-shadow: 0 -10px 40px rgba(0,0,0,.2); max-width: 520px; margin: 0 auto; }
+  .sheet.open { transform: translateY(0); }
+  .grab { width: 40px; height: 5px; border-radius: 3px; background: var(--line);
+          margin: 8px auto 16px; }
+  .field { margin: 0 0 20px; }
+  .field-label { font-size: 13px; font-weight: 600; color: var(--muted);
+                 text-transform: uppercase; letter-spacing: .04em; margin-bottom: 9px; }
+  #voice { width: 100%; padding: 13px; border: 1px solid var(--line); border-radius: 12px;
+           background: var(--bg); color: var(--ink); font-size: 16px; }
+  .speeds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+  .speeds button { font-variant-numeric: tabular-nums; padding: 13px 0; font-size: 15px; }
+  .speeds button.sel { background: var(--accent); color: #fff; border-color: var(--accent);
+                       font-weight: 700; }
+  #sheetDone { width: 100%; margin-top: 4px; padding: 14px; }
   .hidden { display: none; }
 </style>
 </head>
 <body>
 <header>
   <div class="bar">
-    <input id="url" type="url" placeholder="Paste an article URL…" autofocus>
-    <select id="voice"></select>
+    <input id="url" type="url" placeholder="Paste an article URL…"
+           autocomplete="off" autocapitalize="off" autocorrect="off">
     <button id="go" class="primary">Read</button>
+    <button id="gear" class="icon" aria-label="Settings">⚙</button>
     <button id="toggle" class="link">paste text instead</button>
   </div>
   <div class="bar" id="textrow" style="margin-top:8px; display:none;">
@@ -83,33 +118,70 @@
     <button id="play" class="primary">▶</button>
     <input id="seek" type="range" min="0" max="1000" value="0">
     <span id="time">0:00</span>
-    <span class="speed">
-      <span id="rateLabel">1.0×</span>
-      <input id="rate" type="range" min="0.5" max="2.5" step="0.1" value="1"
-             style="width:90px; accent-color:var(--accent);">
-    </span>
+    <button id="speedChip">1.25×</button>
   </div>
   <div id="note"></div>
 </div>
 
 <audio id="audio"></audio>
 
+<div class="sheetbg" id="sheetBg"></div>
+<div class="sheet" id="sheet">
+  <div class="grab"></div>
+  <div class="field">
+    <div class="field-label">Voice</div>
+    <select id="voice"></select>
+  </div>
+  <div class="field">
+    <div class="field-label">Speed</div>
+    <div class="speeds" id="speeds"></div>
+  </div>
+  <button id="sheetDone" class="primary">Done</button>
+</div>
+
 <script>
 const $ = s => document.querySelector(s);
 const audio = $('#audio');
 
-let TEXT = '';          // full article text
-let CHUNKS = [];        // [{index,start,end, marks?, audioUrl?, status}]
-let spans = [];         // span element per absolute mark, keyed globally
-let markIndex = [];     // flat [{start,end,time,chunk}] for the *playing* chunk only
-let playing = -1;       // chunk index currently in <audio>
-let active = -1;        // active span (global span array index) within playing chunk
-let voice = '';
-let genId = 0;          // invalidates async work when a new article loads
+let TEXT = '';
+let CHUNKS = [];
+let spans = [];
+let markIndex = [];       // {time, span} for the playing chunk
+let playing = -1;
+let active = -1;
+let voice = 'en-US-AndrewMultilingualNeural';
+let RATE = 1.25;          // default speed
+let genId = 0;
+const SPEEDS = [0.8, 1.0, 1.25, 1.5, 1.75, 2.0];
 
+// --- Voices + speed presets ---
 fetch('/api/voices').then(r => r.json()).then(vs => {
   $('#voice').innerHTML = vs.map(v => `<option value="${v.id}">${v.label}</option>`).join('');
+  voice = vs[0].id;
 });
+$('#voice').addEventListener('change', e => { voice = e.target.value; });
+
+$('#speeds').innerHTML = SPEEDS.map(s =>
+  `<button data-s="${s}"${s === RATE ? ' class="sel"' : ''}>${s}×</button>`).join('');
+$('#speeds').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  setRate(parseFloat(b.dataset.s));
+});
+function setRate(r) {
+  RATE = r; audio.playbackRate = r;
+  $('#speedChip').textContent = r + '×';
+  $('#speeds').querySelectorAll('button').forEach(b =>
+    b.classList.toggle('sel', parseFloat(b.dataset.s) === r));
+}
+audio.addEventListener('loadedmetadata', () => { audio.playbackRate = RATE; });
+
+// --- Bottom sheet ---
+function openSheet() { $('#sheet').classList.add('open'); $('#sheetBg').classList.add('open'); }
+function closeSheet() { $('#sheet').classList.remove('open'); $('#sheetBg').classList.remove('open'); }
+$('#gear').onclick = openSheet;
+$('#speedChip').onclick = openSheet;
+$('#sheetBg').onclick = closeSheet;
+$('#sheetDone').onclick = closeSheet;
 
 $('#toggle').onclick = () => {
   const row = $('#textrow');
@@ -121,10 +193,7 @@ $('#toggle').onclick = () => {
 const escapeHtml = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const plain = s => escapeHtml(s).replace(/\n{2,}/g, '</p><p>').replace(/\n/g, ' ');
 
-// Render the whole article once, wrapping every word (from every chunk's marks)
-// in a span keyed by a global index so we can highlight across chunk boundaries.
 function renderArticle() {
-  // Collect all marks (absolute char offsets) across chunks, in order.
   const all = [];
   CHUNKS.forEach(c => (c.marks || []).forEach(m => all.push(m)));
   all.sort((a, b) => a.start - b.start);
@@ -149,7 +218,7 @@ function fmt(t) {
   return m + ':' + String(s).padStart(2, '0');
 }
 
-// --- Synthesis of a single chunk (with prefetch dedupe) ---
+// --- Synthesis (dedup + prefetch) ---
 async function ensureChunk(i) {
   const c = CHUNKS[i];
   if (!c || c.audioUrl) return c;
@@ -162,55 +231,76 @@ async function ensureChunk(i) {
     });
     if (!res.ok) throw new Error((await res.json()).detail || 'TTS failed');
     const data = await res.json();
-    if (mine !== genId) return c;                 // article changed; discard
+    if (mine !== genId) return c;
     c.audioUrl = data.audio_url;
     c.marks = data.marks.map(m => ({ start: m.start + c.start, end: m.end + c.start, time: m.time }));
-    renderArticle();                              // re-render to include new words as spans
+    renderArticle();
     return c;
   })();
   return c._promise;
 }
+// Keep a lookahead of 2 chunks warming up so the next part is ready in time.
+function prefetch(i) { for (let j = i; j <= i + 2; j++) ensureChunk(j).catch(() => {}); }
 
-// --- Playback engine: play chunk i, prefetch the next ---
-async function playChunk(i, seekTime = 0) {
+function bindChunk(c) {
+  markIndex = (c.marks || []).map(m => ({ time: m.time, span: m._span }))
+                             .sort((a, b) => a.time - b.time);
+}
+
+// Initial play / seek target (runs inside a user gesture, so await+play is fine).
+async function playFrom(i, seekTime = 0) {
   if (i < 0 || i >= CHUNKS.length) return;
   const mine = genId;
   playing = i;
   updateNote('Loading audio…');
+  prefetch(i);
   let c;
   try { c = await ensureChunk(i); }
   catch (e) { updateNote('Error: ' + e.message); return; }
   if (mine !== genId || playing !== i) return;
-  // Build the playing chunk's mark index (mapped to global span indices).
-  markIndex = (c.marks || []).map(m => ({ time: m.time, span: m._span }))
-                             .sort((a, b) => a.time - b.time);
+  bindChunk(c);
   audio.src = c.audioUrl;
-  audio.playbackRate = parseFloat($('#rate').value);
-  audio.currentTime = 0;
-  await audio.play().catch(() => {});
+  audio.playbackRate = RATE;
+  try { await audio.play(); } catch (e) { updateNote('Tap ▶ to play'); }
   if (seekTime) audio.currentTime = seekTime;
   updateNote('');
-  ensureChunk(i + 1).catch(() => {});             // prefetch next
+  prefetch(i + 1);
 }
 
-function updateNote(msg) {
-  const total = CHUNKS.length;
-  const part = total > 1 ? `Part ${playing + 1} of ${total}` : '';
-  $('#note').textContent = [part, msg].filter(Boolean).join(' · ');
-}
-
+// Auto-advance. Runs inside the media 'ended' event: when the next chunk is
+// already prefetched we switch src + play() SYNCHRONOUSLY, which iOS allows
+// (an async gap here would get the play() blocked -> stuck on part 1).
 audio.addEventListener('ended', () => {
-  if (playing + 1 < CHUNKS.length) playChunk(playing + 1);
-  else { updateNote('Finished'); clearActive(); }
+  const next = playing + 1;
+  if (next >= CHUNKS.length) { updateNote('Finished'); clearActive(); return; }
+  playing = next;
+  const c = CHUNKS[next];
+  if (c && c.audioUrl) {
+    bindChunk(c);
+    audio.src = c.audioUrl;
+    audio.playbackRate = RATE;
+    audio.play().catch(() => updateNote('Tap ▶ to continue'));
+    updateNote('');
+    prefetch(next + 1);
+  } else {
+    updateNote('Loading part ' + (next + 1) + '…');
+    ensureChunk(next).then(cc => {
+      if (playing !== next) return;
+      bindChunk(cc);
+      audio.src = cc.audioUrl;
+      audio.playbackRate = RATE;
+      audio.play().catch(() => updateNote('Tap ▶ to continue'));
+      updateNote('');
+      prefetch(next + 1);
+    }).catch(e => updateNote('Error: ' + e.message));
+  }
 });
 
-// --- Load an article ---
 async function load() {
   const url = $('#url').value.trim();
   const pasted = $('#text').value.trim();
   if (!url && !pasted) return;
   genId++;
-  voice = $('#voice').value;
   $('#go').disabled = true;
   $('#status').className = '';
   $('#status').textContent = 'Extracting article…';
@@ -230,9 +320,9 @@ async function load() {
     $('#title').textContent = data.title;
     $('#title').classList.remove('hidden');
     $('#status').textContent = '';
-    renderArticle();                              // shows text immediately (no marks yet)
+    renderArticle();
     $('#player').classList.add('on');
-    playChunk(0);                                 // start synth + playback of first chunk
+    playFrom(0);
   } catch (e) {
     $('#status').className = 'err';
     $('#status').textContent = 'Error: ' + e.message;
@@ -243,7 +333,7 @@ async function load() {
 $('#go').onclick = load;
 $('#url').addEventListener('keydown', e => { if (e.key === 'Enter') load(); });
 
-// --- Highlight sync within the playing chunk ---
+// --- Highlight sync ---
 function clearActive() { if (spans[active]) spans[active].classList.remove('active'); active = -1; }
 function currentMark(t) {
   let lo = 0, hi = markIndex.length - 1, ans = -1;
@@ -261,7 +351,7 @@ audio.addEventListener('timeupdate', () => {
     if (spans[span]) {
       spans[span].classList.add('active');
       const r = spans[span].getBoundingClientRect();
-      if (r.top < 90 || r.bottom > window.innerHeight - 130)
+      if (r.top < 100 || r.bottom > window.innerHeight - 150)
         spans[span].scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
     active = span;
@@ -271,18 +361,16 @@ audio.addEventListener('timeupdate', () => {
   $('#time').textContent = fmt(audio.currentTime);
 });
 
-// Click any word: find its chunk and jump there.
 function seekToGlobalSpan(spanIdx) {
   const marks = window._allMarks || [];
   const m = marks.find(x => x._span === spanIdx);
   if (!m) return;
   const ci = CHUNKS.findIndex(c => m.start >= c.start && m.start < c.end);
   if (ci < 0) return;
-  const c = CHUNKS[ci];
-  const local = (c.marks || []).find(x => x._span === spanIdx);
+  const local = (CHUNKS[ci].marks || []).find(x => x._span === spanIdx);
   const t = local ? local.time : 0;
   if (ci === playing) { audio.currentTime = t + 0.01; audio.play(); }
-  else playChunk(ci, t + 0.01);
+  else playFrom(ci, t + 0.01);
 }
 
 // --- Controls ---
@@ -291,10 +379,6 @@ audio.addEventListener('play', () => $('#play').textContent = '❚❚');
 audio.addEventListener('pause', () => $('#play').textContent = '▶');
 $('#seek').addEventListener('input', () => {
   if (audio.duration) audio.currentTime = (parseFloat($('#seek').value) / 1000) * audio.duration;
-});
-$('#rate').addEventListener('input', () => {
-  audio.playbackRate = parseFloat($('#rate').value);
-  $('#rateLabel').textContent = parseFloat($('#rate').value).toFixed(1) + '×';
 });
 document.addEventListener('keydown', e => {
   if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
