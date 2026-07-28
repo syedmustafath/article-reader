@@ -198,19 +198,25 @@ const SPEEDS = [0.8, 1.0, 1.25, 1.5, 1.75, 2.0];
 const escapeHtml = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const plain = s => escapeHtml(s).replace(/\n{2,}/g, '</p><p>').replace(/\n/g, ' ');
 
-// POST helper for the slow endpoints. They heartbeat-stream (leading whitespace
-// then the JSON) so Cloudflare's edge doesn't reset the HTTP/2 request; errors
-// come back as {error} with HTTP 200. JSON.parse ignores the leading whitespace.
-async function postJSON(url, body) {
-  const res = await fetch(url, {
+// Runs a slow server task via the job API: POST starts it and returns a job id
+// instantly, then we poll /api/job/{id} until it's done. This keeps every request
+// under ~1s so Cloudflare's edge (which resets slower HTTP/2 requests) never trips.
+async function runJob(url, body) {
+  const start = await fetch(url, {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
   });
-  const txt = await res.text();
-  let data;
-  try { data = JSON.parse(txt); } catch { throw new Error('Bad server response'); }
-  if (!res.ok) throw new Error(data.detail || res.statusText);
-  if (data.error) throw new Error(data.error);
-  return data;
+  const s = await start.json();
+  if (!start.ok) throw new Error(s.detail || start.statusText);
+  const job = s.job;
+  for (let tries = 0; tries < 240; tries++) {   // ~2 min ceiling
+    await new Promise(r => setTimeout(r, 500));
+    const r = await fetch('/api/job/' + job);
+    if (!r.ok) throw new Error('Lost track of the job — try again.');
+    const j = await r.json();
+    if (j.status === 'done') return j.result;
+    if (j.status === 'error') throw new Error(j.error);
+  }
+  throw new Error('Timed out.');
 }
 
 // --- View switching ---
@@ -319,7 +325,7 @@ async function addArticle() {
   $('#addSubmit').textContent = 'Adding…';
   $('#addErr').textContent = '';
   try {
-    await postJSON('/api/articles', { url });
+    await runJob('/api/articles', { url });
     closeSheets();
     await loadList();
   } catch (e) {
@@ -379,7 +385,7 @@ async function ensureChunk(i) {
   if (c._promise) return c._promise;
   const mine = genId;
   c._promise = (async () => {
-    const data = await postJSON('/api/tts', { text: TEXT.slice(c.start, c.end), voice });
+    const data = await runJob('/api/tts', { text: TEXT.slice(c.start, c.end), voice });
     if (mine !== genId) return c;
     c.audioUrl = data.audio_url;
     c.marks = data.marks.map(m => ({ start: m.start + c.start, end: m.end + c.start, time: m.time }));
@@ -464,7 +470,7 @@ async function openArticle(item) {
   $('#player').classList.remove('on');
   clearActive();
   try {
-    const data = await postJSON('/api/extract', { url: item.url });
+    const data = await runJob('/api/extract', { url: item.url });
     TEXT = data.text;
     CHUNKS = data.chunks.map(c => ({ ...c, marks: null, audioUrl: null }));
     $('#title').textContent = item.title || data.title;

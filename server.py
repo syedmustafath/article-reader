@@ -9,7 +9,6 @@ to character ranges so the frontend can highlight words in sync with the audio.
 """
 
 import asyncio
-import json
 import os
 import re
 import uuid
@@ -21,7 +20,7 @@ import edge_tts
 import httpx
 import trafilatura
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -172,31 +171,43 @@ def _cache_audio(data: bytes) -> str:
     return audio_id
 
 
-async def stream_json(work: Callable):
-    """Run async `work()` while emitting whitespace heartbeats, then stream the
-    JSON result last. Render fronts the app with Cloudflare, whose edge resets
-    HTTP/2 requests that produce no bytes within ~1s; edge-tts and slow article
-    extractions routinely exceed that. Sending an early byte keeps the stream
-    alive. The body is leading whitespace + one JSON object (JSON.parse-safe);
-    errors come back as {"error": ...} with HTTP 200, which the client checks."""
-    async def gen():
-        yield b" "  # first byte immediately => fast TTFB, no edge reset
-        task = asyncio.create_task(work())
-        while True:
-            done, _ = await asyncio.wait({task}, timeout=0.5)
-            if done:
-                break
-            yield b" "
-        try:
-            payload = task.result()
-        except HTTPException as e:
-            payload = {"error": e.detail, "status": e.status_code}
-        except Exception as e:  # surface as an in-body error, not a dropped stream
-            payload = {"error": str(e)}
-        yield json.dumps(payload).encode()
+# --- Background jobs ---
+# Render fronts the app with Cloudflare, whose edge resets any HTTP/2 request
+# where the origin takes longer than ~1s to respond (edge-tts and slow article
+# extractions always exceed that). So slow work never blocks a request: we start
+# it in the background, return a job id immediately, and the client polls
+# /api/job/{id} (each call returns in milliseconds) until the result is ready.
+_JOBS: dict[str, dict] = {}
+_JOB_ORDER: list[str] = []
+_MAX_JOBS = 500
 
-    # text/plain (not application/json) so the edge doesn't buffer/transform it.
-    return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
+
+def start_job(work: Callable) -> str:
+    """Schedule async `work()` in the background; return a job id at once."""
+    job_id = uuid.uuid4().hex
+    _JOBS[job_id] = {"status": "pending"}
+    _JOB_ORDER.append(job_id)
+    while len(_JOB_ORDER) > _MAX_JOBS:
+        _JOBS.pop(_JOB_ORDER.pop(0), None)
+
+    async def runner():
+        try:
+            _JOBS[job_id] = {"status": "done", "result": await work()}
+        except HTTPException as e:
+            _JOBS[job_id] = {"status": "error", "error": e.detail}
+        except Exception as e:  # report instead of crashing the worker
+            _JOBS[job_id] = {"status": "error", "error": str(e)}
+
+    asyncio.create_task(runner())
+    return job_id
+
+
+@app.get("/api/job/{job_id}")
+def get_job(job_id: str):
+    job = _JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(404, "Job expired. Try again.")
+    return job
 
 
 @app.get("/api/voices")
@@ -216,7 +227,7 @@ async def extract(req: ExtractRequest):
             title, text = "Pasted text", req.text.strip()
         return {"title": title, "text": text, "chunks": make_chunks(text)}
 
-    return await stream_json(work)
+    return {"job": start_job(work)}
 
 
 @app.post("/api/tts")
@@ -229,7 +240,7 @@ async def tts(req: TTSRequest):
         audio, marks = await synthesize(req.text, voice)
         return {"audio_url": f"/audio/{_cache_audio(audio)}.mp3", "marks": marks}
 
-    return await stream_json(work)
+    return {"job": start_job(work)}
 
 
 @app.get("/audio/{audio_id}.mp3")
@@ -284,7 +295,7 @@ async def add_article(req: ArticleRequest):
         created = resp.json()
         return created[0] if isinstance(created, list) else created
 
-    return await stream_json(work)
+    return {"job": start_job(work)}
 
 
 @app.delete("/api/articles/{article_id}")
