@@ -2,3 +2,4 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 edge-tts==7.2.8
 trafilatura==1.12.2
+httpx==0.28.1

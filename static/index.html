@@ -23,12 +23,14 @@
   header { position: sticky; top: 0; z-index: 10; background: var(--panel);
            border-bottom: 1px solid var(--line); padding: 12px 16px;
            padding-top: max(12px, env(safe-area-inset-top)); }
-  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  .bar { display: flex; gap: 8px; align-items: center;
          max-width: 780px; margin: 0 auto; }
-  input[type=url], textarea {
-    flex: 1 1 240px; min-width: 160px; padding: 11px 13px; border: 1px solid var(--line);
-    border-radius: 11px; background: var(--bg); color: var(--ink); font-size: 16px; }
-  textarea { width: 100%; resize: vertical; min-height: 90px; font-family: inherit; }
+  .bar-between { justify-content: space-between; }
+  .app-title { font-size: 22px; font-weight: 800; margin: 0; letter-spacing: -.01em; }
+  .spacer { flex: 1; }
+  input[type=url] {
+    width: 100%; padding: 13px; border: 1px solid var(--line);
+    border-radius: 12px; background: var(--bg); color: var(--ink); font-size: 16px; }
   button { font-family: inherit; cursor: pointer; border: 1px solid var(--line);
            background: var(--bg); color: var(--ink); border-radius: 11px;
            padding: 11px 16px; font-size: 15px; }
@@ -37,9 +39,23 @@
   button:disabled { opacity: .5; cursor: default; }
   .icon { width: 44px; padding: 0; height: 44px; font-size: 19px; flex: none;
           display: flex; align-items: center; justify-content: center; }
-  .link { background: none; border: none; color: var(--accent); padding: 6px 4px;
-          font-size: 14px; text-decoration: underline; }
   main { max-width: 720px; margin: 0 auto; padding: 26px 20px 170px; }
+
+  /* List view */
+  #list { max-width: 720px; margin: 0 auto; }
+  .card { display: flex; align-items: stretch; border: 1px solid var(--line);
+          border-radius: 14px; margin-bottom: 12px; background: var(--panel); overflow: hidden; }
+  .card-main { flex: 1; padding: 15px 16px; cursor: pointer; min-width: 0; }
+  .card-title { font-size: 17px; font-weight: 650; line-height: 1.3; margin-bottom: 5px;
+                overflow-wrap: anywhere; }
+  .card-meta { font-size: 13px; color: var(--muted); }
+  .card .del { border: none; background: none; color: var(--muted); font-size: 24px;
+               width: 46px; flex: none; }
+  #listStatus { color: var(--muted); text-align: center; padding: 44px 20px; font-size: 15px; }
+  #listStatus.err { color: #d0402a; }
+
+  /* Reader view */
+  #back { font-size: 28px; line-height: 1; }
   #title { font-family: -apple-system, system-ui, sans-serif; font-size: 27px;
            font-weight: 800; line-height: 1.22; margin: 0 0 22px; letter-spacing: -.01em; }
   #article { font-family: Georgia, 'Times New Roman', serif; font-size: 20px; line-height: 1.78; }
@@ -68,7 +84,7 @@
   #note { max-width: 780px; margin: 7px auto 0; text-align: center; color: var(--muted);
           font-size: 12px; min-height: 15px; }
 
-  /* Bottom sheet */
+  /* Bottom sheets */
   .sheetbg { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 20;
              opacity: 0; pointer-events: none; transition: opacity .2s; }
   .sheetbg.open { opacity: 1; pointer-events: auto; }
@@ -89,43 +105,68 @@
   .speeds button { font-variant-numeric: tabular-nums; padding: 13px 0; font-size: 15px; }
   .speeds button.sel { background: var(--accent); color: #fff; border-color: var(--accent);
                        font-weight: 700; }
-  #sheetDone { width: 100%; margin-top: 4px; padding: 14px; }
+  .add-err { color: #d0402a; font-size: 14px; min-height: 18px; margin: 2px 0 10px; }
+  #addSubmit, #sheetDone { width: 100%; margin-top: 4px; padding: 14px; }
   .hidden { display: none; }
 </style>
 </head>
 <body>
-<header>
-  <div class="bar">
-    <input id="url" type="url" placeholder="Paste an article URL…"
-           autocomplete="off" autocapitalize="off" autocorrect="off">
-    <button id="go" class="primary">Read</button>
-    <button id="gear" class="icon" aria-label="Settings">⚙</button>
-    <button id="toggle" class="link">paste text instead</button>
-  </div>
-  <div class="bar" id="textrow" style="margin-top:8px; display:none;">
-    <textarea id="text" placeholder="…or paste the article text here."></textarea>
-  </div>
-</header>
 
-<main>
-  <h1 id="title" class="hidden"></h1>
-  <div id="status">Paste an article URL above and hit <b>Read</b>.</div>
-  <div id="article"></div>
-</main>
+<!-- ===== LIST VIEW ===== -->
+<div id="listView">
+  <header>
+    <div class="bar bar-between">
+      <h1 class="app-title">Reading List</h1>
+      <button id="addBtn" class="primary">+ Add article</button>
+    </div>
+  </header>
+  <main>
+    <div id="list"></div>
+    <div id="listStatus"></div>
+  </main>
+</div>
 
-<div class="player" id="player">
-  <div class="inner">
-    <button id="play" class="primary">▶</button>
-    <input id="seek" type="range" min="0" max="1000" value="0">
-    <span id="time">0:00</span>
-    <button id="speedChip">1.25×</button>
+<!-- ===== READER VIEW ===== -->
+<div id="readerView" class="hidden">
+  <header>
+    <div class="bar">
+      <button id="back" class="icon" aria-label="Back to list">‹</button>
+      <div class="spacer"></div>
+      <button id="gear" class="icon" aria-label="Settings">⚙</button>
+    </div>
+  </header>
+  <main>
+    <h1 id="title" class="hidden"></h1>
+    <div id="status"></div>
+    <div id="article"></div>
+  </main>
+  <div class="player" id="player">
+    <div class="inner">
+      <button id="play" class="primary">▶</button>
+      <input id="seek" type="range" min="0" max="1000" value="0">
+      <span id="time">0:00</span>
+      <button id="speedChip">1.25×</button>
+    </div>
+    <div id="note"></div>
   </div>
-  <div id="note"></div>
 </div>
 
 <audio id="audio"></audio>
 
+<!-- ===== SHEETS (shared overlay) ===== -->
 <div class="sheetbg" id="sheetBg"></div>
+
+<div class="sheet" id="addSheet">
+  <div class="grab"></div>
+  <div class="field">
+    <div class="field-label">Article URL</div>
+    <input id="addUrl" type="url" placeholder="https://…"
+           autocomplete="off" autocapitalize="off" autocorrect="off">
+  </div>
+  <div id="addErr" class="add-err"></div>
+  <button id="addSubmit" class="primary">Add to list</button>
+</div>
+
 <div class="sheet" id="sheet">
   <div class="grab"></div>
   <div class="field">
@@ -154,6 +195,15 @@ let RATE = 1.25;          // default speed
 let genId = 0;
 const SPEEDS = [0.8, 1.0, 1.25, 1.5, 1.75, 2.0];
 
+const escapeHtml = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const plain = s => escapeHtml(s).replace(/\n{2,}/g, '</p><p>').replace(/\n/g, ' ');
+
+// --- View switching ---
+function showView(v) {
+  $('#listView').classList.toggle('hidden', v !== 'list');
+  $('#readerView').classList.toggle('hidden', v !== 'reader');
+}
+
 // --- Voices + speed presets ---
 fetch('/api/voices').then(r => r.json()).then(vs => {
   $('#voice').innerHTML = vs.map(v => `<option value="${v.id}">${v.label}</option>`).join('');
@@ -175,24 +225,117 @@ function setRate(r) {
 }
 audio.addEventListener('loadedmetadata', () => { audio.playbackRate = RATE; });
 
-// --- Bottom sheet ---
-function openSheet() { $('#sheet').classList.add('open'); $('#sheetBg').classList.add('open'); }
-function closeSheet() { $('#sheet').classList.remove('open'); $('#sheetBg').classList.remove('open'); }
-$('#gear').onclick = openSheet;
-$('#speedChip').onclick = openSheet;
-$('#sheetBg').onclick = closeSheet;
-$('#sheetDone').onclick = closeSheet;
+// --- Bottom sheets ---
+function openSheetEl(el) { el.classList.add('open'); $('#sheetBg').classList.add('open'); }
+function closeSheets() {
+  $('#sheet').classList.remove('open');
+  $('#addSheet').classList.remove('open');
+  $('#sheetBg').classList.remove('open');
+}
+$('#gear').onclick = () => openSheetEl($('#sheet'));
+$('#speedChip').onclick = () => openSheetEl($('#sheet'));
+$('#sheetBg').onclick = closeSheets;
+$('#sheetDone').onclick = closeSheets;
 
-$('#toggle').onclick = () => {
-  const row = $('#textrow');
-  const showing = row.style.display !== 'none';
-  row.style.display = showing ? 'none' : 'flex';
-  $('#toggle').textContent = showing ? 'paste text instead' : 'use a URL instead';
+// ============================================================
+//  READING LIST
+// ============================================================
+async function loadList() {
+  $('#listStatus').className = '';
+  $('#listStatus').textContent = 'Loading…';
+  try {
+    const res = await fetch('/api/articles');
+    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    renderList(await res.json());
+  } catch (e) {
+    $('#list').innerHTML = '';
+    $('#listStatus').className = 'err';
+    $('#listStatus').textContent = 'Error: ' + e.message;
+  }
+}
+
+function cardHtml(a) {
+  const date = a.added_at
+    ? new Date(a.added_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+  const meta = [a.domain, date, a.est_minutes ? `~${a.est_minutes} min` : '']
+    .filter(Boolean).join(' · ');
+  return `<div class="card" data-id="${a.id}">
+    <div class="card-main">
+      <div class="card-title">${escapeHtml(a.title || a.url)}</div>
+      <div class="card-meta">${escapeHtml(meta)}</div>
+    </div>
+    <button class="del" aria-label="Delete">×</button>
+  </div>`;
+}
+
+function renderList(items) {
+  if (!items.length) {
+    $('#list').innerHTML = '';
+    $('#listStatus').className = '';
+    $('#listStatus').textContent = 'No saved articles yet. Tap “+ Add article” to save one.';
+    return;
+  }
+  $('#listStatus').textContent = '';
+  $('#list').innerHTML = items.map(cardHtml).join('');
+  $('#list').querySelectorAll('.card').forEach(el => {
+    const item = items.find(x => x.id === el.dataset.id);
+    el.querySelector('.card-main').onclick = () => openArticle(item);
+    el.querySelector('.del').onclick = () => deleteArticle(el.dataset.id, el);
+  });
+}
+
+async function deleteArticle(id, el) {
+  el.style.opacity = .4;
+  try {
+    const r = await fetch('/api/articles/' + id, { method: 'DELETE' });
+    if (!r.ok) throw new Error((await r.json()).detail || 'Delete failed');
+    el.remove();
+    if (!$('#list').children.length) renderList([]);
+  } catch (e) {
+    el.style.opacity = 1;
+    alert('Could not delete: ' + e.message);
+  }
+}
+
+async function addArticle() {
+  const url = $('#addUrl').value.trim();
+  if (!url) return;
+  $('#addSubmit').disabled = true;
+  $('#addSubmit').textContent = 'Adding…';
+  $('#addErr').textContent = '';
+  try {
+    const res = await fetch('/api/articles', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ url })
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    closeSheets();
+    await loadList();
+  } catch (e) {
+    $('#addErr').textContent = 'Error: ' + e.message;
+  } finally {
+    $('#addSubmit').disabled = false;
+    $('#addSubmit').textContent = 'Add to list';
+  }
+}
+$('#addBtn').onclick = () => { $('#addUrl').value = ''; $('#addErr').textContent = ''; openSheetEl($('#addSheet')); $('#addUrl').focus(); };
+$('#addSubmit').onclick = addArticle;
+$('#addUrl').addEventListener('keydown', e => { if (e.key === 'Enter') addArticle(); });
+
+$('#back').onclick = () => {
+  audio.pause();
+  audio.removeAttribute('src');
+  audio.load();
+  genId++;              // cancel any in-flight synthesis
+  playing = -1;
+  $('#player').classList.remove('on');
+  clearActive();
+  showView('list');
 };
 
-const escapeHtml = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-const plain = s => escapeHtml(s).replace(/\n{2,}/g, '</p><p>').replace(/\n/g, ' ');
-
+// ============================================================
+//  ARTICLE READER  (unchanged playback engine)
+// ============================================================
 function renderArticle() {
   const all = [];
   CHUNKS.forEach(c => (c.marks || []).forEach(m => all.push(m)));
@@ -303,12 +446,11 @@ audio.addEventListener('ended', () => {
   }
 });
 
-async function load() {
-  const url = $('#url').value.trim();
-  const pasted = $('#text').value.trim();
-  if (!url && !pasted) return;
+// Open a saved article: switch to reader, extract text, render, play.
+async function openArticle(item) {
+  showView('reader');
+  window.scrollTo(0, 0);
   genId++;
-  $('#go').disabled = true;
   $('#status').className = '';
   $('#status').textContent = 'Extracting article…';
   $('#title').classList.add('hidden');
@@ -318,13 +460,13 @@ async function load() {
   try {
     const res = await fetch('/api/extract', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ url: url || null, text: pasted || null })
+      body: JSON.stringify({ url: item.url })
     });
     if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
     const data = await res.json();
     TEXT = data.text;
     CHUNKS = data.chunks.map(c => ({ ...c, marks: null, audioUrl: null }));
-    $('#title').textContent = data.title;
+    $('#title').textContent = item.title || data.title;
     $('#title').classList.remove('hidden');
     $('#status').textContent = '';
     renderArticle();
@@ -333,12 +475,8 @@ async function load() {
   } catch (e) {
     $('#status').className = 'err';
     $('#status').textContent = 'Error: ' + e.message;
-  } finally {
-    $('#go').disabled = false;
   }
 }
-$('#go').onclick = load;
-$('#url').addEventListener('keydown', e => { if (e.key === 'Enter') load(); });
 
 // --- Highlight sync ---
 function clearActive() { if (spans[active]) spans[active].classList.remove('active'); active = -1; }
@@ -388,10 +526,15 @@ $('#seek').addEventListener('input', () => {
   if (audio.duration) audio.currentTime = (parseFloat($('#seek').value) / 1000) * audio.duration;
 });
 document.addEventListener('keydown', e => {
-  if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes(e.target.tagName)) {
+  if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes(e.target.tagName)
+      && !$('#readerView').classList.contains('hidden')) {
     e.preventDefault(); $('#play').click();
   }
 });
+
+// --- Init ---
+showView('list');
+loadList();
 </script>
 </body>
 </html>

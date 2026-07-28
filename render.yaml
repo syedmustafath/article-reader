@@ -10,3 +10,9 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
+      # Reading-list storage. Set the actual values in the Render dashboard
+      # (Environment tab) — sync:false keeps the secrets out of the repo.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false

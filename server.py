@@ -9,12 +9,15 @@ to character ranges so the frontend can highlight words in sync with the audio.
 """
 
 import asyncio
+import os
 import re
 import uuid
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import edge_tts
+import httpx
 import trafilatura
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
@@ -23,6 +26,10 @@ from pydantic import BaseModel
 
 app = FastAPI(title="Natural Voice Reader")
 BASE_DIR = Path(__file__).resolve().parent  # so static paths work regardless of CWD
+
+# Supabase (reading-list storage). Set as env vars; endpoints 503 if missing.
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
 # In-memory audio cache: id -> mp3 bytes. Cleared on restart; capped below.
 _AUDIO: dict[str, bytes] = {}
@@ -55,6 +62,10 @@ class ExtractRequest(BaseModel):
 class TTSRequest(BaseModel):
     text: str
     voice: str = "en-US-AndrewMultilingualNeural"
+
+
+class ArticleRequest(BaseModel):
+    url: str
 
 
 def extract_article(url: str) -> tuple[str, str]:
@@ -191,6 +202,55 @@ def get_audio(audio_id: str):
     if data is None:
         raise HTTPException(404, "Audio expired. Reload the article.")
     return Response(content=data, media_type="audio/mpeg")
+
+
+# --- Reading list (Supabase-backed) ---
+async def _supabase(method: str, path: str, **kwargs) -> httpx.Response:
+    """Issue a PostgREST request to the Supabase `articles` table."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise HTTPException(503, "Reading list storage is not configured (set SUPABASE_URL/SUPABASE_KEY).")
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+    headers.update(kwargs.pop("headers", {}))
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.request(method, f"{SUPABASE_URL}/rest/v1{path}", headers=headers, **kwargs)
+    if resp.status_code >= 400:
+        raise HTTPException(502, f"Reading list storage error: {resp.text}")
+    return resp
+
+
+@app.get("/api/articles")
+async def list_articles():
+    resp = await _supabase("GET", "/articles?select=*&order=added_at.desc")
+    return resp.json()
+
+
+@app.post("/api/articles")
+async def add_article(req: ArticleRequest):
+    url = req.url.strip()
+    if not url:
+        raise HTTPException(400, "Provide a url.")
+    title, text = await asyncio.to_thread(extract_article, url)
+    row = {
+        "url": url,
+        "title": title,
+        "domain": urlparse(url).hostname or "",
+        "est_minutes": max(1, round(len(text.split()) / 200)),
+    }
+    resp = await _supabase(
+        "POST", "/articles", json=row, headers={"Prefer": "return=representation"}
+    )
+    created = resp.json()
+    return created[0] if isinstance(created, list) else created
+
+
+@app.delete("/api/articles/{article_id}")
+async def delete_article(article_id: str):
+    await _supabase("DELETE", f"/articles?id=eq.{article_id}")
+    return {"ok": True}
 
 
 @app.get("/")

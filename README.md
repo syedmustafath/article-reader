@@ -7,6 +7,30 @@ voices + word-by-word highlighting. A DIY replacement for paid read-aloud featur
 - **Article extraction:** paste a URL and [`trafilatura`](https://trafilatura.readthedocs.io/) pulls the clean article text (or paste raw text).
 - **Fast start:** the article is synthesized in paragraph-sized chunks. The first (small) chunk plays within seconds; later chunks prefetch while you listen.
 - **Highlighting:** edge-tts word-boundary timings are aligned to the text so the current word is highlighted as it's spoken. Click any word to jump there.
+- **Reading list:** save articles to a synced list (Supabase). The home screen is the list; tap an article to open the reader. "Add article" saves a URL (the title is fetched on add; the full text is re-extracted on open).
+
+## Reading-list storage (Supabase)
+
+The list is stored in a free Supabase Postgres DB so it syncs across devices and
+survives restarts (Render's free filesystem is ephemeral, so a hosted DB is
+required). Without the env vars below, the app still runs but the list endpoints
+return a clear 503.
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. In the SQL editor, create the table:
+   ```sql
+   create table articles (
+     id uuid primary key default gen_random_uuid(),
+     url text not null,
+     title text,
+     domain text,
+     est_minutes int,
+     added_at timestamptz default now()
+   );
+   ```
+3. Project Settings → API: copy the **Project URL** and the **service_role** key.
+4. Set env vars `SUPABASE_URL` and `SUPABASE_KEY` — in Render (Environment tab)
+   and locally (`export SUPABASE_URL=… SUPABASE_KEY=…`) for testing.
 
 ## Setup
 
