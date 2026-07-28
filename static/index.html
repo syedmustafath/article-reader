@@ -198,6 +198,21 @@ const SPEEDS = [0.8, 1.0, 1.25, 1.5, 1.75, 2.0];
 const escapeHtml = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const plain = s => escapeHtml(s).replace(/\n{2,}/g, '</p><p>').replace(/\n/g, ' ');
 
+// POST helper for the slow endpoints. They heartbeat-stream (leading whitespace
+// then the JSON) so Cloudflare's edge doesn't reset the HTTP/2 request; errors
+// come back as {error} with HTTP 200. JSON.parse ignores the leading whitespace.
+async function postJSON(url, body) {
+  const res = await fetch(url, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+  });
+  const txt = await res.text();
+  let data;
+  try { data = JSON.parse(txt); } catch { throw new Error('Bad server response'); }
+  if (!res.ok) throw new Error(data.detail || res.statusText);
+  if (data.error) throw new Error(data.error);
+  return data;
+}
+
 // --- View switching ---
 function showView(v) {
   $('#listView').classList.toggle('hidden', v !== 'list');
@@ -304,11 +319,7 @@ async function addArticle() {
   $('#addSubmit').textContent = 'Adding…';
   $('#addErr').textContent = '';
   try {
-    const res = await fetch('/api/articles', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ url })
-    });
-    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+    await postJSON('/api/articles', { url });
     closeSheets();
     await loadList();
   } catch (e) {
@@ -368,12 +379,7 @@ async function ensureChunk(i) {
   if (c._promise) return c._promise;
   const mine = genId;
   c._promise = (async () => {
-    const res = await fetch('/api/tts', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ text: TEXT.slice(c.start, c.end), voice })
-    });
-    if (!res.ok) throw new Error((await res.json()).detail || 'TTS failed');
-    const data = await res.json();
+    const data = await postJSON('/api/tts', { text: TEXT.slice(c.start, c.end), voice });
     if (mine !== genId) return c;
     c.audioUrl = data.audio_url;
     c.marks = data.marks.map(m => ({ start: m.start + c.start, end: m.end + c.start, time: m.time }));
@@ -458,12 +464,7 @@ async function openArticle(item) {
   $('#player').classList.remove('on');
   clearActive();
   try {
-    const res = await fetch('/api/extract', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ url: item.url })
-    });
-    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
-    const data = await res.json();
+    const data = await postJSON('/api/extract', { url: item.url });
     TEXT = data.text;
     CHUNKS = data.chunks.map(c => ({ ...c, marks: null, audioUrl: null }));
     $('#title').textContent = item.title || data.title;

@@ -9,18 +9,19 @@ to character ranges so the frontend can highlight words in sync with the audio.
 """
 
 import asyncio
+import json
 import os
 import re
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import urlparse
 
 import edge_tts
 import httpx
 import trafilatura
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -171,6 +172,33 @@ def _cache_audio(data: bytes) -> str:
     return audio_id
 
 
+async def stream_json(work: Callable):
+    """Run async `work()` while emitting whitespace heartbeats, then stream the
+    JSON result last. Render fronts the app with Cloudflare, whose edge resets
+    HTTP/2 requests that produce no bytes within ~1s; edge-tts and slow article
+    extractions routinely exceed that. Sending an early byte keeps the stream
+    alive. The body is leading whitespace + one JSON object (JSON.parse-safe);
+    errors come back as {"error": ...} with HTTP 200, which the client checks."""
+    async def gen():
+        yield b" "  # first byte immediately => fast TTFB, no edge reset
+        task = asyncio.create_task(work())
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=0.5)
+            if done:
+                break
+            yield b" "
+        try:
+            payload = task.result()
+        except HTTPException as e:
+            payload = {"error": e.detail, "status": e.status_code}
+        except Exception as e:  # surface as an in-body error, not a dropped stream
+            payload = {"error": str(e)}
+        yield json.dumps(payload).encode()
+
+    # text/plain (not application/json) so the edge doesn't buffer/transform it.
+    return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
+
+
 @app.get("/api/voices")
 def get_voices():
     return VOICES
@@ -178,13 +206,17 @@ def get_voices():
 
 @app.post("/api/extract")
 async def extract(req: ExtractRequest):
-    if req.url:
-        title, text = await asyncio.to_thread(extract_article, req.url.strip())
-    elif req.text and req.text.strip():
-        title, text = "Pasted text", req.text.strip()
-    else:
+    if not req.url and not (req.text and req.text.strip()):
         raise HTTPException(400, "Provide either a url or text.")
-    return {"title": title, "text": text, "chunks": make_chunks(text)}
+
+    async def work():
+        if req.url:
+            title, text = await asyncio.to_thread(extract_article, req.url.strip())
+        else:
+            title, text = "Pasted text", req.text.strip()
+        return {"title": title, "text": text, "chunks": make_chunks(text)}
+
+    return await stream_json(work)
 
 
 @app.post("/api/tts")
@@ -192,8 +224,12 @@ async def tts(req: TTSRequest):
     if not req.text.strip():
         raise HTTPException(400, "Empty text.")
     voice = req.voice if req.voice in _VOICE_IDS else VOICES[0]["id"]
-    audio, marks = await synthesize(req.text, voice)
-    return {"audio_url": f"/audio/{_cache_audio(audio)}.mp3", "marks": marks}
+
+    async def work():
+        audio, marks = await synthesize(req.text, voice)
+        return {"audio_url": f"/audio/{_cache_audio(audio)}.mp3", "marks": marks}
+
+    return await stream_json(work)
 
 
 @app.get("/audio/{audio_id}.mp3")
@@ -233,18 +269,22 @@ async def add_article(req: ArticleRequest):
     url = req.url.strip()
     if not url:
         raise HTTPException(400, "Provide a url.")
-    title, text = await asyncio.to_thread(extract_article, url)
-    row = {
-        "url": url,
-        "title": title,
-        "domain": urlparse(url).hostname or "",
-        "est_minutes": max(1, round(len(text.split()) / 200)),
-    }
-    resp = await _supabase(
-        "POST", "/articles", json=row, headers={"Prefer": "return=representation"}
-    )
-    created = resp.json()
-    return created[0] if isinstance(created, list) else created
+
+    async def work():
+        title, text = await asyncio.to_thread(extract_article, url)
+        row = {
+            "url": url,
+            "title": title,
+            "domain": urlparse(url).hostname or "",
+            "est_minutes": max(1, round(len(text.split()) / 200)),
+        }
+        resp = await _supabase(
+            "POST", "/articles", json=row, headers={"Prefer": "return=representation"}
+        )
+        created = resp.json()
+        return created[0] if isinstance(created, list) else created
+
+    return await stream_json(work)
 
 
 @app.delete("/api/articles/{article_id}")
