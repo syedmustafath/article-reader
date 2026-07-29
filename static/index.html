@@ -61,8 +61,17 @@
   #article { font-family: Georgia, 'Times New Roman', serif; font-size: 20px; line-height: 1.78; }
   #article p { margin: 0 0 1.15em; }
   .w { border-radius: 5px; cursor: pointer; transition: background .08s; }
-  .w.active { background: var(--hl); color: var(--hl-ink);
+  .w.active, .w.flash { background: var(--hl); color: var(--hl-ink);
               box-shadow: 0 0 0 3px var(--hl); }
+
+  /* Compass: appears when the narrated word is scrolled out of view */
+  .compass { position: fixed; right: 16px; z-index: 15;
+             bottom: calc(104px + env(safe-area-inset-bottom));
+             width: 46px; height: 46px; border-radius: 50%; border: none;
+             background: var(--accent); color: #fff; font-size: 20px; cursor: pointer;
+             box-shadow: 0 4px 14px rgba(0,0,0,.28); display: none;
+             align-items: center; justify-content: center; }
+  .compass.show { display: flex; }
   #status { color: var(--muted); font-size: 15px; padding: 40px 0; text-align: center; }
   #status.err { color: #d0402a; }
 
@@ -107,6 +116,17 @@
                        font-weight: 700; }
   .add-err { color: #d0402a; font-size: 14px; min-height: 18px; margin: 2px 0 10px; }
   #addSubmit, #sheetDone { width: 100%; margin-top: 4px; padding: 14px; }
+  .switch-row { display: flex; align-items: center; justify-content: space-between;
+                gap: 12px; font-size: 16px; }
+  .switch { position: relative; width: 48px; height: 28px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .track { position: absolute; inset: 0; background: var(--line); border-radius: 999px;
+                   transition: background .2s; cursor: pointer; }
+  .switch .track::before { content: ''; position: absolute; left: 3px; top: 3px;
+                           width: 22px; height: 22px; background: #fff; border-radius: 50%;
+                           transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+  .switch input:checked + .track { background: var(--accent); }
+  .switch input:checked + .track::before { transform: translateX(20px); }
   .hidden { display: none; }
 </style>
 </head>
@@ -149,6 +169,7 @@
     </div>
     <div id="note"></div>
   </div>
+  <button class="compass" id="compass" aria-label="Scroll to the word being read">↓</button>
 </div>
 
 <audio id="audio"></audio>
@@ -177,6 +198,13 @@
     <div class="field-label">Speed</div>
     <div class="speeds" id="speeds"></div>
   </div>
+  <div class="field">
+    <div class="field-label">Reading guide</div>
+    <div class="switch-row">
+      <span>Highlight the word being read</span>
+      <label class="switch"><input type="checkbox" id="hlToggle"><span class="track"></span></label>
+    </div>
+  </div>
   <button id="sheetDone" class="primary">Done</button>
 </div>
 
@@ -196,6 +224,7 @@ let totalWords = 0;       // article word count, for ETA
 let CUR_ID = null;        // id of the open article, for resume
 let dragging = false;     // user is scrubbing the progress bar
 let lastSave = 0;         // throttle for resume-position saves
+let highlightOn = localStorage.getItem('nvr_highlight') !== 'off';  // reading-guide highlight
 const WPM_1X = 180;       // measured pace of the default voice (Andrew) at 1x
 const SPEEDS = [1.0, 1.1, 1.2, 1.25, 1.35, 1.5];  // finer steps, capped at 1.5x
 // default 1.25x, but remember the user's last-used speed across sessions
@@ -279,6 +308,14 @@ $('#gear').onclick = () => openSheetEl($('#sheet'));
 $('#speedChip').onclick = () => openSheetEl($('#sheet'));
 $('#sheetBg').onclick = closeSheets;
 $('#sheetDone').onclick = closeSheets;
+
+// Reading-guide highlight toggle (persisted)
+$('#hlToggle').checked = highlightOn;
+$('#hlToggle').addEventListener('change', e => {
+  highlightOn = e.target.checked;
+  try { localStorage.setItem('nvr_highlight', highlightOn ? 'on' : 'off'); } catch (err) {}
+  if (spans[active]) spans[active].classList.toggle('active', highlightOn);
+});
 
 // ============================================================
 //  READING LIST
@@ -371,6 +408,7 @@ $('#back').onclick = () => {
   genId++;              // cancel any in-flight synthesis
   playing = -1;
   $('#player').classList.remove('on');
+  $('#compass').classList.remove('show');
   clearActive();
   loadList();           // refresh cards so the "% read" badge updates
   showView('list');
@@ -519,6 +557,34 @@ async function openArticle(item) {
 
 // --- Highlight sync ---
 function clearActive() { if (spans[active]) spans[active].classList.remove('active'); active = -1; }
+
+// --- Reading pointer: free scroll + a compass back to the narrated word ---
+function updateCompass() {
+  const sp = spans[active];
+  const inReader = !$('#readerView').classList.contains('hidden');
+  if (!sp || !inReader || playing < 0) { $('#compass').classList.remove('show'); return; }
+  const r = sp.getBoundingClientRect();
+  if (r.bottom < 72) {                              // narrated word is above the viewport
+    $('#compass').textContent = '↑'; $('#compass').classList.add('show');
+  } else if (r.top > window.innerHeight - 96) {     // below the viewport (behind the player)
+    $('#compass').textContent = '↓'; $('#compass').classList.add('show');
+  } else {
+    $('#compass').classList.remove('show');
+  }
+}
+let compassRAF = 0;
+window.addEventListener('scroll', () => {
+  if (compassRAF) return;
+  compassRAF = requestAnimationFrame(() => { compassRAF = 0; updateCompass(); });
+}, { passive: true });
+$('#compass').onclick = () => {
+  const sp = spans[active];
+  if (!sp) return;
+  sp.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  sp.classList.add('flash');                        // brief pulse so it's easy to spot
+  setTimeout(() => sp.classList.remove('flash'), 1100);
+  $('#compass').classList.remove('show');
+};
 function currentMark(t) {
   let lo = 0, hi = markIndex.length - 1, ans = -1;
   while (lo <= hi) {
@@ -532,13 +598,9 @@ audio.addEventListener('timeupdate', () => {
   const span = mi >= 0 ? markIndex[mi].span : -1;
   if (span !== active) {
     if (spans[active]) spans[active].classList.remove('active');
-    if (spans[span]) {
-      spans[span].classList.add('active');
-      const r = spans[span].getBoundingClientRect();
-      if (r.top < 100 || r.bottom > window.innerHeight - 150)
-        spans[span].scrollIntoView({ block: 'center', behavior: 'smooth' });
-    }
+    if (highlightOn && spans[span]) spans[span].classList.add('active');
     active = span;
+    updateCompass();      // no forced scroll — the compass offers to catch up
   }
   const frac = articleFrac();
   if (!dragging) {
