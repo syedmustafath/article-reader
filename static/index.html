@@ -76,8 +76,8 @@
   #play { width: 52px; height: 52px; border-radius: 50%; font-size: 19px; flex: none;
           display: flex; align-items: center; justify-content: center; }
   #seek { flex: 1; accent-color: var(--accent); height: 26px; }
-  #time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px;
-          flex: none; min-width: 42px; }
+  #time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px;
+          flex: none; min-width: 82px; text-align: right; white-space: nowrap; }
   #speedChip { flex: none; background: var(--chip); border-color: transparent;
                padding: 9px 13px; font-size: 14px; font-weight: 600;
                font-variant-numeric: tabular-nums; }
@@ -191,9 +191,15 @@ let markIndex = [];       // {time, span} for the playing chunk
 let playing = -1;
 let active = -1;
 let voice = 'en-US-AndrewMultilingualNeural';
-let RATE = 1.25;          // default speed
 let genId = 0;
-const SPEEDS = [0.8, 1.0, 1.25, 1.5, 1.75, 2.0];
+let totalWords = 0;       // article word count, for ETA
+let CUR_ID = null;        // id of the open article, for resume
+let dragging = false;     // user is scrubbing the progress bar
+let lastSave = 0;         // throttle for resume-position saves
+const WPM_1X = 180;       // measured pace of the default voice (Andrew) at 1x
+const SPEEDS = [1.0, 1.1, 1.2, 1.25, 1.35, 1.5];  // finer steps, capped at 1.5x
+// default 1.25x, but remember the user's last-used speed across sessions
+let RATE = (() => { const v = parseFloat(localStorage.getItem('nvr_rate')); return SPEEDS.includes(v) ? v : 1.25; })();
 
 const escapeHtml = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 const plain = s => escapeHtml(s).replace(/\n{2,}/g, '</p><p>').replace(/\n/g, ' ');
@@ -240,11 +246,27 @@ $('#speeds').addEventListener('click', e => {
 });
 function setRate(r) {
   RATE = r; audio.playbackRate = r;
+  try { localStorage.setItem('nvr_rate', r); } catch (e) {}
   $('#speedChip').textContent = r + '×';
   $('#speeds').querySelectorAll('button').forEach(b =>
     b.classList.toggle('sel', parseFloat(b.dataset.s) === r));
+  if (TEXT) updateTimeDisplay(articleFrac());   // ETA reflects the new speed at once
 }
+setRate(RATE);   // sync chip / selected preset / stored value on load
 audio.addEventListener('loadedmetadata', () => { audio.playbackRate = RATE; });
+
+// --- Whole-article progress + ETA (word-based, scales with speed) ---
+function etaTotalSec() { return totalWords ? (totalWords / (WPM_1X * RATE)) * 60 : 0; }
+function articleFrac() {           // fraction of the whole article read so far
+  const c = CHUNKS[playing];
+  if (!c || !audio.duration || !TEXT) return 0;
+  const within = Math.min(1, audio.currentTime / audio.duration);
+  return Math.min(1, (c.start + within * (c.end - c.start)) / TEXT.length);
+}
+function updateTimeDisplay(frac) {
+  const total = etaTotalSec();
+  $('#time').textContent = fmt(frac * total) + ' / ' + fmt(total);
+}
 
 // --- Bottom sheets ---
 function openSheetEl(el) { el.classList.add('open'); $('#sheetBg').classList.add('open'); }
@@ -278,7 +300,9 @@ async function loadList() {
 function cardHtml(a) {
   const date = a.added_at
     ? new Date(a.added_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
-  const meta = [a.domain, date, a.est_minutes ? `~${a.est_minutes} min` : '']
+  const p = loadProgress(a.id);
+  const read = p > 0.01 && p < 0.99 ? `${Math.round(p * 100)}% read` : '';
+  const meta = [a.domain, date, a.est_minutes ? `~${a.est_minutes} min` : '', read]
     .filter(Boolean).join(' · ');
   return `<div class="card" data-id="${a.id}">
     <div class="card-main">
@@ -340,6 +364,7 @@ $('#addSubmit').onclick = addArticle;
 $('#addUrl').addEventListener('keydown', e => { if (e.key === 'Enter') addArticle(); });
 
 $('#back').onclick = () => {
+  saveProgress();       // remember where we are for next time
   audio.pause();
   audio.removeAttribute('src');
   audio.load();
@@ -347,6 +372,7 @@ $('#back').onclick = () => {
   playing = -1;
   $('#player').classList.remove('on');
   clearActive();
+  loadList();           // refresh cards so the "% read" badge updates
   showView('list');
 };
 
@@ -434,7 +460,7 @@ async function playFrom(i, seekTime = 0) {
 // (an async gap here would get the play() blocked -> stuck on part 1).
 audio.addEventListener('ended', () => {
   const next = playing + 1;
-  if (next >= CHUNKS.length) { updateNote('Finished'); clearActive(); return; }
+  if (next >= CHUNKS.length) { updateNote('Finished'); clearActive(); clearProgress(CUR_ID); return; }
   playing = next;
   const c = CHUNKS[next];
   if (c && c.audioUrl) {
@@ -463,22 +489,28 @@ async function openArticle(item) {
   showView('reader');
   window.scrollTo(0, 0);
   genId++;
+  CUR_ID = item.id;
   $('#status').className = '';
   $('#status').textContent = 'Extracting article…';
   $('#title').classList.add('hidden');
   $('#article').innerHTML = '';
   $('#player').classList.remove('on');
+  $('#seek').value = 0;
   clearActive();
   try {
     const data = await runJob('/api/extract', { url: item.url });
     TEXT = data.text;
+    totalWords = (TEXT.match(/\S+/g) || []).length;
     CHUNKS = data.chunks.map(c => ({ ...c, marks: null, audioUrl: null }));
     $('#title').textContent = item.title || data.title;
     $('#title').classList.remove('hidden');
     $('#status').textContent = '';
     renderArticle();
     $('#player').classList.add('on');
-    playFrom(0);
+    updateTimeDisplay(0);
+    const resume = loadProgress(item.id);   // continue where we left off last time
+    if (resume > 0.01 && resume < 0.99) seekToChar(resume * TEXT.length);
+    else playFrom(0);
   } catch (e) {
     $('#status').className = 'err';
     $('#status').textContent = 'Error: ' + e.message;
@@ -508,9 +540,12 @@ audio.addEventListener('timeupdate', () => {
     }
     active = span;
   }
-  const d = audio.duration || 0;
-  $('#seek').value = d ? (audio.currentTime / d) * 1000 : 0;
-  $('#time').textContent = fmt(audio.currentTime);
+  const frac = articleFrac();
+  if (!dragging) {
+    $('#seek').value = frac * 1000;      // progress across the whole article
+    updateTimeDisplay(frac);
+  }
+  if (Date.now() - lastSave > 4000) { lastSave = Date.now(); saveProgress(); }
 });
 
 function seekToGlobalSpan(spanIdx) {
@@ -525,12 +560,62 @@ function seekToGlobalSpan(spanIdx) {
   else playFrom(ci, t + 0.01);
 }
 
+// --- Seek by character position (for the whole-article progress bar + resume) ---
+function chunkForChar(ch) { return CHUNKS.findIndex(c => ch >= c.start && ch < c.end); }
+function charToTime(c, ch) {         // audio time of the last word starting at/before `ch`
+  const marks = c.marks || [];
+  let lo = 0, hi = marks.length - 1, ans = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (marks[mid].start <= ch) { ans = marks[mid].time; lo = mid + 1; } else hi = mid - 1;
+  }
+  return ans;
+}
+async function seekToChar(ch) {
+  ch = Math.max(0, Math.min((TEXT.length || 1) - 1, ch));
+  const ci = chunkForChar(ch);
+  if (ci < 0) return;
+  if (ci === playing && audio.duration && CHUNKS[ci].marks) {
+    audio.currentTime = charToTime(CHUNKS[ci], ch);
+    audio.play().catch(() => {});
+  } else {
+    await playFrom(ci);
+    const c = CHUNKS[ci];
+    if (c && c.marks) audio.currentTime = charToTime(c, ch);
+  }
+}
+
+// --- Resume position (per article, in localStorage) ---
+const progKey = id => 'nvr_pos_' + id;
+function saveProgress() {
+  if (!CUR_ID || playing < 0) return;
+  const f = articleFrac();
+  try {
+    if (f > 0.01 && f < 0.995) localStorage.setItem(progKey(CUR_ID), String(f));
+    else localStorage.removeItem(progKey(CUR_ID));
+  } catch (e) {}
+}
+function loadProgress(id) {
+  const f = parseFloat(localStorage.getItem(progKey(id)));
+  return isFinite(f) ? f : 0;
+}
+function clearProgress(id) { try { localStorage.removeItem(progKey(id)); } catch (e) {} }
+
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveProgress(); });
+window.addEventListener('pagehide', saveProgress);
+
 // --- Controls ---
 $('#play').onclick = () => audio.paused ? audio.play() : audio.pause();
 audio.addEventListener('play', () => $('#play').textContent = '❚❚');
 audio.addEventListener('pause', () => $('#play').textContent = '▶');
 $('#seek').addEventListener('input', () => {
-  if (audio.duration) audio.currentTime = (parseFloat($('#seek').value) / 1000) * audio.duration;
+  dragging = true;
+  updateTimeDisplay(parseFloat($('#seek').value) / 1000);   // live position preview
+});
+$('#seek').addEventListener('change', () => {
+  const frac = parseFloat($('#seek').value) / 1000;
+  dragging = false;
+  if (TEXT) seekToChar(frac * TEXT.length);
 });
 document.addEventListener('keydown', e => {
   if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes(e.target.tagName)

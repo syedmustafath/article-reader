@@ -287,7 +287,8 @@ async def add_article(req: ArticleRequest):
             "url": url,
             "title": title,
             "domain": urlparse(url).hostname or "",
-            "est_minutes": max(1, round(len(text.split()) / 200)),
+            # ~180 wpm (measured for Andrew) at 1x => 225 wpm at the default 1.25x.
+            "est_minutes": max(1, round(len(text.split()) / 225)),
         }
         resp = await _supabase(
             "POST", "/articles", json=row, headers={"Prefer": "return=representation"}
