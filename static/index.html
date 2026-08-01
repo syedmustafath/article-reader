@@ -39,7 +39,7 @@
   button:disabled { opacity: .5; cursor: default; }
   .icon { width: 44px; padding: 0; height: 44px; font-size: 19px; flex: none;
           display: flex; align-items: center; justify-content: center; }
-  main { max-width: 720px; margin: 0 auto; padding: 26px 20px 170px; }
+  main { max-width: 720px; margin: 0 auto; padding: 26px 20px 210px; }
 
   /* List view */
   #list { max-width: 720px; margin: 0 auto; }
@@ -66,7 +66,7 @@
 
   /* Compass: appears when the narrated word is scrolled out of view */
   .compass { position: fixed; right: 16px; z-index: 15;
-             bottom: calc(104px + env(safe-area-inset-bottom));
+             bottom: calc(168px + env(safe-area-inset-bottom));
              width: 46px; height: 46px; border-radius: 50%; border: none;
              background: var(--accent); color: #fff; font-size: 20px; cursor: pointer;
              box-shadow: 0 4px 14px rgba(0,0,0,.28); display: none;
@@ -80,18 +80,25 @@
             padding-bottom: max(12px, env(safe-area-inset-bottom)); display: none;
             box-shadow: 0 -6px 22px rgba(0,0,0,.07); }
   .player.on { display: block; }
-  .player .inner { max-width: 780px; margin: 0 auto; width: 100%;
-                   display: flex; align-items: center; gap: 12px; }
-  #play { width: 52px; height: 52px; border-radius: 50%; font-size: 19px; flex: none;
-          display: flex; align-items: center; justify-content: center; }
-  #seek { flex: 1; accent-color: var(--accent); height: 26px; }
-  #time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px;
-          flex: none; min-width: 82px; text-align: right; white-space: nowrap; }
-  #speedChip { flex: none; background: var(--chip); border-color: transparent;
-               padding: 9px 13px; font-size: 14px; font-weight: 600;
+  .pwrap { max-width: 780px; margin: 0 auto; }
+  #seek { width: 100%; accent-color: var(--accent); height: 24px; display: block; }
+  .times { display: flex; justify-content: space-between; margin: 0 2px 4px;
+           font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+  .controls { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+  .transport { display: flex; align-items: center; justify-content: center; gap: 26px; }
+  .bigplay { width: 62px; height: 62px; border-radius: 50%; background: var(--accent);
+             border: none; color: #fff; padding: 0;
+             display: flex; align-items: center; justify-content: center; }
+  .bigplay svg { width: 30px; height: 30px; }
+  .tbtn { width: 46px; height: 46px; border: none; background: none; color: var(--ink);
+          padding: 0; display: flex; align-items: center; justify-content: center; }
+  .tbtn svg { width: 27px; height: 27px; }
+  .tbtn:disabled { opacity: .32; }
+  #speedChip { justify-self: start; background: var(--chip); border-color: transparent;
+               padding: 8px 12px; font-size: 14px; font-weight: 600;
                font-variant-numeric: tabular-nums; }
-  #note { max-width: 780px; margin: 7px auto 0; text-align: center; color: var(--muted);
-          font-size: 12px; min-height: 15px; }
+  #note { text-align: center; color: var(--muted); font-size: 12px; min-height: 15px;
+          margin-top: 6px; }
 
   /* Bottom sheets */
   .sheetbg { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 20;
@@ -161,13 +168,24 @@
     <div id="article"></div>
   </main>
   <div class="player" id="player">
-    <div class="inner">
-      <button id="play" class="primary">▶</button>
+    <div class="pwrap">
       <input id="seek" type="range" min="0" max="1000" value="0">
-      <span id="time">0:00</span>
-      <button id="speedChip">1.25×</button>
+      <div class="times"><span id="time-cur">0:00</span><span id="time-rem">0:00</span></div>
+      <div class="controls">
+        <button id="speedChip">1.25×</button>
+        <div class="transport">
+          <button id="prev" class="tbtn" aria-label="Previous part">
+            <svg viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="6" width="2.4" height="12" rx="1"/><path d="M19 6.2v11.6L10 12z"/></svg>
+          </button>
+          <button id="play" class="bigplay" aria-label="Play or pause"></button>
+          <button id="next" class="tbtn" aria-label="Next part">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 6.2v11.6L14 12z"/><rect x="16.6" y="6" width="2.4" height="12" rx="1"/></svg>
+          </button>
+        </div>
+        <span></span>
+      </div>
+      <div id="note"></div>
     </div>
-    <div id="note"></div>
   </div>
   <button class="compass" id="compass" aria-label="Scroll to the word being read">↓</button>
 </div>
@@ -294,7 +312,9 @@ function articleFrac() {           // fraction of the whole article read so far
 }
 function updateTimeDisplay(frac) {
   const total = etaTotalSec();
-  $('#time').textContent = fmt(frac * total) + ' / ' + fmt(total);
+  const cur = frac * total;
+  $('#time-cur').textContent = fmt(cur);
+  $('#time-rem').textContent = '-' + fmt(Math.max(0, total - cur));
 }
 
 // --- Bottom sheets ---
@@ -471,6 +491,7 @@ function updateNote(msg) {
   const total = CHUNKS.length;
   const part = total > 1 && playing >= 0 ? `Part ${playing + 1} of ${total}` : '';
   $('#note').textContent = [part, msg].filter(Boolean).join(' · ');
+  updateTransport();
 }
 
 // Initial play / seek target (runs inside a user gesture, so await+play is fine).
@@ -667,9 +688,26 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) saveP
 window.addEventListener('pagehide', saveProgress);
 
 // --- Controls ---
+const ICON_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+const ICON_PAUSE = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4.2" height="14" rx="1.2"/><rect x="13.8" y="5" width="4.2" height="14" rx="1.2"/></svg>';
+$('#play').innerHTML = ICON_PLAY;
 $('#play').onclick = () => audio.paused ? audio.play() : audio.pause();
-audio.addEventListener('play', () => $('#play').textContent = '❚❚');
-audio.addEventListener('pause', () => $('#play').textContent = '▶');
+audio.addEventListener('play', () => $('#play').innerHTML = ICON_PAUSE);
+audio.addEventListener('pause', () => $('#play').innerHTML = ICON_PLAY);
+
+// Previous/next part. Prev restarts the current part if we're >3s in (podcast-style).
+$('#prev').onclick = () => {
+  if (playing < 0) return;
+  if (audio.currentTime > 3 || playing === 0) { audio.currentTime = 0; audio.play(); }
+  else playFrom(playing - 1);
+};
+$('#next').onclick = () => {
+  if (playing >= 0 && playing + 1 < CHUNKS.length) playFrom(playing + 1);
+};
+function updateTransport() {
+  $('#prev').disabled = playing < 0;
+  $('#next').disabled = !(playing >= 0 && playing + 1 < CHUNKS.length);
+}
 $('#seek').addEventListener('input', () => {
   dragging = true;
   updateTimeDisplay(parseFloat($('#seek').value) / 1000);   // live position preview
