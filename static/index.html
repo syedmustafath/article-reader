@@ -8,13 +8,13 @@
   :root {
     --bg: #ffffff; --panel: #ffffff; --ink: #1a1a1c; --muted: #8a8a8f;
     --accent: #e0662a; --hl: #ffe08a; --hl-ink: #402c00; --line: #ececef;
-    --chip: #f4f4f6; --sheet: #ffffff;
+    --chip: #f4f4f6; --sheet: #ffffff; --uhl: rgba(255, 208, 84, .55);
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #0f0f11; --panel: #17171a; --ink: #f1f1f3; --muted: #8e8e94;
       --accent: #f0783c; --hl: #5a4413; --hl-ink: #ffe9b3; --line: #2a2a2e;
-      --chip: #242428; --sheet: #1b1b1f;
+      --chip: #242428; --sheet: #1b1b1f; --uhl: rgba(255, 200, 70, .26);
     }
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -134,6 +134,43 @@
                            transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
   .switch input:checked + .track { background: var(--accent); }
   .switch input:checked + .track::before { transform: translateX(20px); }
+
+  /* User highlights in the article */
+  .hl { background: var(--uhl); border-radius: 3px; cursor: pointer; }
+  .hl.has-note { box-shadow: inset 0 -2px 0 var(--accent); }
+
+  /* Floating selection toolbar */
+  .selbar { position: fixed; z-index: 30; display: none; gap: 2px;
+            background: #202024; border-radius: 12px; padding: 4px;
+            box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+  .selbar.show { display: flex; }
+  .selbar button { background: none; border: none; color: #fff; font-size: 14px;
+                   font-weight: 600; padding: 9px 14px; border-radius: 9px; white-space: nowrap; }
+  .selbar button:active { background: rgba(255,255,255,.16); }
+
+  /* Highlight note sheet */
+  .hl-quote { font-family: Georgia, serif; font-size: 16px; line-height: 1.5;
+              background: var(--chip); border-radius: 12px; padding: 12px 14px;
+              margin: 4px 0 16px; max-height: 30vh; overflow: auto; }
+  #hlNote { width: 100%; min-height: 88px; padding: 12px; border: 1px solid var(--line);
+            border-radius: 12px; background: var(--bg); color: var(--ink);
+            font-family: inherit; font-size: 16px; resize: vertical; }
+  .hl-actions { display: flex; gap: 10px; margin-top: 6px; }
+  .hl-actions #hlSave { flex: 1; padding: 14px; }
+  .hl-actions #hlDelete { padding: 14px 18px; color: #d0402a; }
+
+  /* Highlights screen */
+  #hlList { max-width: 720px; margin: 0 auto; }
+  .hl-group { margin-bottom: 24px; }
+  .hl-group-title { font-size: 13px; font-weight: 700; color: var(--muted);
+                    text-transform: uppercase; letter-spacing: .03em; margin-bottom: 12px;
+                    overflow-wrap: anywhere; }
+  .hl-item { border-left: 3px solid var(--accent); padding: 2px 0 2px 14px;
+             margin-bottom: 16px; cursor: pointer; }
+  .hl-item-quote { font-family: Georgia, serif; font-size: 17px; line-height: 1.5; }
+  .hl-item-note { font-size: 14px; color: var(--muted); margin-top: 6px; }
+  #hlListStatus { color: var(--muted); text-align: center; padding: 44px 20px; font-size: 15px; }
+  #hlListStatus.err { color: #d0402a; }
   .hidden { display: none; }
 </style>
 </head>
@@ -144,12 +181,31 @@
   <header>
     <div class="bar bar-between">
       <h1 class="app-title">Reading List</h1>
-      <button id="addBtn" class="primary">+ Add article</button>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button id="hlScreenBtn" class="icon" aria-label="Highlights">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>
+        </button>
+        <button id="addBtn" class="primary">+ Add</button>
+      </div>
     </div>
   </header>
   <main>
     <div id="list"></div>
     <div id="listStatus"></div>
+  </main>
+</div>
+
+<!-- ===== HIGHLIGHTS VIEW ===== -->
+<div id="highlightsView" class="hidden">
+  <header>
+    <div class="bar">
+      <button id="hlBack" class="icon" aria-label="Back to list">‹</button>
+      <h1 class="app-title" style="margin-left:4px;">Highlights</h1>
+    </div>
+  </header>
+  <main>
+    <div id="hlList"></div>
+    <div id="hlListStatus"></div>
   </main>
 </div>
 
@@ -192,8 +248,27 @@
 
 <audio id="audio"></audio>
 
+<!-- Floating selection toolbar (highlight / note) -->
+<div class="selbar" id="selbar">
+  <button id="selHighlight">Highlight</button>
+  <button id="selNote">＋ Note</button>
+</div>
+
 <!-- ===== SHEETS (shared overlay) ===== -->
 <div class="sheetbg" id="sheetBg"></div>
+
+<div class="sheet" id="hlSheet">
+  <div class="grab"></div>
+  <div class="hl-quote" id="hlQuote"></div>
+  <div class="field">
+    <div class="field-label">Note</div>
+    <textarea id="hlNote" placeholder="Add a note…"></textarea>
+  </div>
+  <div class="hl-actions">
+    <button id="hlDelete">Delete</button>
+    <button id="hlSave" class="primary">Save</button>
+  </div>
+</div>
 
 <div class="sheet" id="addSheet">
   <div class="grab"></div>
@@ -243,12 +318,16 @@ let CUR_ID = null;        // id of the open article, for resume
 let dragging = false;     // user is scrubbing the progress bar
 let lastSave = 0;         // throttle for resume-position saves
 let highlightOn = localStorage.getItem('nvr_highlight') !== 'off';  // reading-guide highlight
+let HIGHLIGHTS = [];      // user highlights for the open article: {id,start,end,quote,note,...}
+let CUR_URL = null, CUR_TITLE = null;   // open article context (for saving highlights)
+let EDIT_HL = null;       // highlight currently open in the note sheet
 const WPM_1X = 180;       // measured pace of the default voice (Andrew) at 1x
 const SPEEDS = [1.0, 1.1, 1.2, 1.25, 1.35, 1.5];  // finer steps, capped at 1.5x
 // default 1.25x, but remember the user's last-used speed across sessions
 let RATE = (() => { const v = parseFloat(localStorage.getItem('nvr_rate')); return SPEEDS.includes(v) ? v : 1.25; })();
 
-const escapeHtml = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const escapeHtml = s => String(s).replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const plain = s => escapeHtml(s).replace(/\n{2,}/g, '</p><p>').replace(/\n/g, ' ');
 
 // Runs a slow server task via the job API: POST starts it and returns a job id
@@ -276,6 +355,18 @@ async function runJob(url, body) {
 function showView(v) {
   $('#listView').classList.toggle('hidden', v !== 'list');
   $('#readerView').classList.toggle('hidden', v !== 'reader');
+  $('#highlightsView').classList.toggle('hidden', v !== 'highlights');
+}
+
+// Direct JSON request for the fast highlight endpoints (Supabase ops are < 1s).
+async function apiJSON(method, url, body) {
+  const opt = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opt.body = JSON.stringify(body);
+  const r = await fetch(url, opt);
+  const txt = await r.text();
+  const d = txt ? JSON.parse(txt) : null;
+  if (!r.ok) throw new Error((d && d.detail) || r.statusText);
+  return d;
 }
 
 // --- Voices + speed presets ---
@@ -322,6 +413,7 @@ function openSheetEl(el) { el.classList.add('open'); $('#sheetBg').classList.add
 function closeSheets() {
   $('#sheet').classList.remove('open');
   $('#addSheet').classList.remove('open');
+  $('#hlSheet').classList.remove('open');
   $('#sheetBg').classList.remove('open');
 }
 $('#gear').onclick = () => openSheetEl($('#sheet'));
@@ -437,24 +529,52 @@ $('#back').onclick = () => {
 // ============================================================
 //  ARTICLE READER  (unchanged playback engine)
 // ============================================================
-function renderArticle() {
-  const all = [];
-  CHUNKS.forEach(c => (c.marks || []).forEach(m => all.push(m)));
-  all.sort((a, b) => a.start - b.start);
-  const out = [];
-  let cur = 0;
-  all.forEach((m, i) => {
-    if (m.start > cur) out.push(plain(TEXT.slice(cur, m.start)));
-    out.push(`<span class="w" data-i="${i}">${escapeHtml(TEXT.slice(m.start, m.end))}</span>`);
-    cur = m.end;
-    m._span = i;
-  });
-  if (cur < TEXT.length) out.push(plain(TEXT.slice(cur)));
-  $('#article').innerHTML = '<p>' + out.join('') + '</p>';
-  spans = Array.from(document.querySelectorAll('.w'));
-  spans.forEach((sp, i) => sp.onclick = () => seekToGlobalSpan(i));
-  window._allMarks = all;
+// Every text run becomes a span carrying data-s (its char offset in TEXT), so a
+// text selection maps cleanly to character offsets. Word spans (.w) keep data-i
+// for narration highlight + click-to-seek; any run inside a saved highlight range
+// gets .hl + data-hl. Paragraph breaks (\n\n) split <p>s between spans.
+function hlIdAt(pos) {
+  for (const h of HIGHLIGHTS) if (pos >= h.start && pos < h.end) return h.id;
+  return null;
 }
+function renderArticle() {
+  const marks = [];
+  CHUNKS.forEach(c => (c.marks || []).forEach(m => marks.push(m)));
+  marks.sort((a, b) => a.start - b.start);
+  marks.forEach((m, i) => m._span = i);
+  window._allMarks = marks;
+
+  let html = '<p>';
+  const spanFor = (s, e, extraCls, dataI) => {
+    const hid = hlIdAt(s);
+    const cls = extraCls + (hid ? ' hl' : '') + (hid && hlNote(hid) ? ' has-note' : '');
+    const di = dataI != null ? ` data-i="${dataI}"` : '';
+    const dh = hid ? ` data-hl="${hid}"` : '';
+    return `<span class="${cls}" data-s="${s}"${di}${dh}>${escapeHtml(TEXT.slice(s, e))}</span>`;
+  };
+  const emitGap = (s, e) => {                 // plain text between words; handle paragraphs
+    let idx = s;
+    for (const part of TEXT.slice(s, e).split(/(\n{2,})/)) {
+      if (!part) continue;
+      if (/^\n{2,}$/.test(part)) { html += '</p><p>'; idx += part.length; continue; }
+      const hid = hlIdAt(idx);
+      const cls = 'g' + (hid ? ' hl' : '') + (hid && hlNote(hid) ? ' has-note' : '');
+      const dh = hid ? ` data-hl="${hid}"` : '';
+      html += `<span class="${cls}" data-s="${idx}"${dh}>${escapeHtml(part).replace(/\n/g, ' ')}</span>`;
+      idx += part.length;
+    }
+  };
+  let cur = 0;
+  marks.forEach((m, i) => {
+    if (m.start > cur) emitGap(cur, m.start);
+    html += spanFor(m.start, m.end, 'w', i);
+    cur = m.end;
+  });
+  if (cur < TEXT.length) emitGap(cur, TEXT.length);
+  $('#article').innerHTML = html + '</p>';
+  spans = Array.from(document.querySelectorAll('.w'));
+}
+function hlNote(id) { const h = HIGHLIGHTS.find(x => String(x.id) === String(id)); return h && h.note; }
 
 function fmt(t) {
   if (!isFinite(t)) t = 0;
@@ -544,11 +664,13 @@ audio.addEventListener('ended', () => {
 });
 
 // Open a saved article: switch to reader, extract text, render, play.
-async function openArticle(item) {
+// `seekChar` (optional) jumps to a spot — used when opening from a highlight.
+async function openArticle(item, seekChar) {
   showView('reader');
   window.scrollTo(0, 0);
   genId++;
-  CUR_ID = item.id;
+  CUR_ID = item.id; CUR_URL = item.url; CUR_TITLE = item.title;
+  HIGHLIGHTS = [];
   $('#status').className = '';
   $('#status').textContent = 'Extracting article…';
   $('#title').classList.add('hidden');
@@ -557,19 +679,26 @@ async function openArticle(item) {
   $('#seek').value = 0;
   clearActive();
   try {
-    const data = await runJob('/api/extract', { url: item.url });
+    const [data, hls] = await Promise.all([
+      runJob('/api/extract', { url: item.url }),
+      apiJSON('GET', '/api/highlights?article_id=' + encodeURIComponent(item.id)).catch(() => [])
+    ]);
     TEXT = data.text;
     totalWords = (TEXT.match(/\S+/g) || []).length;
     CHUNKS = data.chunks.map(c => ({ ...c, marks: null, audioUrl: null }));
+    HIGHLIGHTS = hls || [];
     $('#title').textContent = item.title || data.title;
     $('#title').classList.remove('hidden');
     $('#status').textContent = '';
     renderArticle();
     $('#player').classList.add('on');
     updateTimeDisplay(0);
-    const resume = loadProgress(item.id);   // continue where we left off last time
-    if (resume > 0.01 && resume < 0.99) seekToChar(resume * TEXT.length);
-    else playFrom(0);
+    if (seekChar != null) { seekToChar(seekChar); scrollToChar(seekChar); }
+    else {
+      const resume = loadProgress(item.id);   // continue where we left off last time
+      if (resume > 0.01 && resume < 0.99) seekToChar(resume * TEXT.length);
+      else playFrom(0);
+    }
   } catch (e) {
     $('#status').className = 'err';
     $('#status').textContent = 'Error: ' + e.message;
@@ -595,6 +724,7 @@ function updateCompass() {
 }
 let compassRAF = 0;
 window.addEventListener('scroll', () => {
+  $('#selbar').classList.remove('show');   // selection toolbar shouldn't float while scrolling
   if (compassRAF) return;
   compassRAF = requestAnimationFrame(() => { compassRAF = 0; updateCompass(); });
 }, { passive: true });
@@ -641,6 +771,175 @@ function seekToGlobalSpan(spanIdx) {
   const t = local ? local.time : 0;
   if (ci === playing) { audio.currentTime = t + 0.01; audio.play(); }
   else playFrom(ci, t + 0.01);
+}
+
+// ============================================================
+//  HIGHLIGHTS & NOTES
+// ============================================================
+// Tapping a highlight opens its note; tapping a plain word seeks there.
+$('#article').addEventListener('click', e => {
+  if (window.getSelection && !window.getSelection().isCollapsed) return;  // mid-selection
+  const hlEl = e.target.closest('[data-hl]');
+  if (hlEl) { openHighlight(hlEl.dataset.hl); return; }
+  const w = e.target.closest('.w');
+  if (w) seekToGlobalSpan(+w.dataset.i);
+});
+
+// Map a selection endpoint (text node + offset) to a character offset in TEXT.
+function charOffsetOf(node, offset) {
+  const el = node.nodeType === 3 ? node.parentElement : node;
+  const span = el && el.closest('[data-s]');
+  if (!span) return null;
+  return +span.dataset.s + (node.nodeType === 3 ? offset : 0);
+}
+// Expand a raw [a,b] range to cover the whole words it touches.
+function snapToWords(a, b) {
+  const marks = window._allMarks || [];
+  if (!marks.length) return { start: a, end: b };
+  let s = null, e = null;
+  for (const m of marks) if (m.end > a) { s = m; break; }
+  for (const m of marks) { if (m.start < b) e = m; else break; }
+  if (!s || !e || s.start >= e.end) return null;
+  return { start: s.start, end: e.end };
+}
+function currentSelectionRange() {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  const art = $('#article');
+  if (!art.contains(range.startContainer) || !art.contains(range.endContainer)) return null;
+  const a = charOffsetOf(range.startContainer, range.startOffset);
+  const b = charOffsetOf(range.endContainer, range.endOffset);
+  if (a == null || b == null) return null;
+  return snapToWords(Math.min(a, b), Math.max(a, b));
+}
+
+// Floating "Highlight / Note" toolbar over the current selection
+function updateSelToolbar() {
+  const tb = $('#selbar');
+  const snapped = currentSelectionRange();
+  if (!snapped) { tb.classList.remove('show'); return; }
+  tb.dataset.start = snapped.start; tb.dataset.end = snapped.end;
+  const rect = window.getSelection().getRangeAt(0).getBoundingClientRect();
+  const top = rect.top - 52;
+  tb.style.top = (top < 60 ? rect.bottom + 8 : top) + 'px';
+  tb.style.left = Math.min(window.innerWidth - 160, Math.max(8, rect.left + rect.width / 2 - 74)) + 'px';
+  tb.classList.add('show');
+}
+['mouseup', 'touchend'].forEach(ev =>
+  document.addEventListener(ev, () => setTimeout(updateSelToolbar, 10)));
+document.addEventListener('selectionchange', () => {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) $('#selbar').classList.remove('show');
+});
+
+async function createHighlight(withNote) {
+  const start = +$('#selbar').dataset.start, end = +$('#selbar').dataset.end;
+  if (!(end > start)) return;
+  const quote = TEXT.slice(start, end);
+  $('#selbar').classList.remove('show');
+  window.getSelection().removeAllRanges();
+  const tmp = { id: 'tmp-' + Date.now(), article_id: CUR_ID, url: CUR_URL, title: CUR_TITLE,
+                start, end, quote, note: '' };
+  HIGHLIGHTS.push(tmp);
+  renderArticle();
+  try {
+    const row = await apiJSON('POST', '/api/highlights',
+      { article_id: CUR_ID, url: CUR_URL, title: CUR_TITLE, start, end, quote, note: '' });
+    Object.assign(tmp, row);                 // adopt the real id
+    renderArticle();
+  } catch (e) {
+    HIGHLIGHTS = HIGHLIGHTS.filter(h => h !== tmp);
+    renderArticle();
+    alert('Could not save highlight: ' + e.message);
+    return;
+  }
+  if (withNote) openHighlight(tmp.id);
+}
+$('#selHighlight').onclick = () => createHighlight(false);
+$('#selNote').onclick = () => createHighlight(true);
+
+function openHighlight(id) {
+  const h = HIGHLIGHTS.find(x => String(x.id) === String(id));
+  if (!h) return;
+  EDIT_HL = h;
+  $('#hlQuote').textContent = h.quote;
+  $('#hlNote').value = h.note || '';
+  openSheetEl($('#hlSheet'));
+}
+$('#hlSave').onclick = async () => {
+  if (!EDIT_HL) return;
+  const note = $('#hlNote').value.trim();
+  EDIT_HL.note = note;
+  closeSheets();
+  renderArticle();
+  try { await apiJSON('PATCH', '/api/highlights/' + EDIT_HL.id, { note }); } catch (e) {}
+};
+$('#hlDelete').onclick = async () => {
+  if (!EDIT_HL) return;
+  const id = EDIT_HL.id;
+  HIGHLIGHTS = HIGHLIGHTS.filter(h => h.id !== id);
+  closeSheets();
+  renderArticle();
+  try { await apiJSON('DELETE', '/api/highlights/' + id); } catch (e) {}
+};
+// keep the text selection alive when tapping the toolbar (dataset already holds the range)
+$('#selbar').addEventListener('mousedown', e => e.preventDefault());
+
+// Scroll a character position into view and flash it (used when opening a highlight).
+function scrollToChar(ch) {
+  const el = [...$('#article').querySelectorAll('[data-s]')]
+    .reverse().find(s => +s.dataset.s <= ch);
+  if (!el) return;
+  el.scrollIntoView({ block: 'center' });
+  el.classList.add('flash');
+  setTimeout(() => el.classList.remove('flash'), 1500);
+}
+
+// --- Highlights homepage screen ---
+$('#hlScreenBtn').onclick = openHighlightsScreen;
+$('#hlBack').onclick = () => showView('list');
+
+async function openHighlightsScreen() {
+  showView('highlights');
+  window.scrollTo(0, 0);
+  $('#hlList').innerHTML = '';
+  $('#hlListStatus').className = '';
+  $('#hlListStatus').textContent = 'Loading…';
+  try {
+    renderHighlightsScreen(await apiJSON('GET', '/api/highlights'));
+  } catch (e) {
+    $('#hlListStatus').className = 'err';
+    $('#hlListStatus').textContent = 'Error: ' + e.message;
+  }
+}
+
+function renderHighlightsScreen(all) {
+  if (!all || !all.length) {
+    $('#hlListStatus').textContent = 'No highlights yet. Select text in an article to save one.';
+    return;
+  }
+  $('#hlListStatus').textContent = '';
+  const groups = new Map();
+  all.forEach(h => {
+    if (!groups.has(h.article_id))
+      groups.set(h.article_id, { title: h.title, url: h.url, id: h.article_id, items: [] });
+    groups.get(h.article_id).items.push(h);
+  });
+  $('#hlList').innerHTML = [...groups.values()].map(g => `
+    <div class="hl-group">
+      <div class="hl-group-title">${escapeHtml(g.title || g.url || 'Article')}</div>
+      ${g.items.map(h => `
+        <div class="hl-item" data-aid="${escapeHtml(g.id)}" data-url="${escapeHtml(g.url || '')}"
+             data-title="${escapeHtml(g.title || '')}" data-start="${h.start}">
+          <div class="hl-item-quote">${escapeHtml(h.quote || '')}</div>
+          ${h.note ? `<div class="hl-item-note">${escapeHtml(h.note)}</div>` : ''}
+        </div>`).join('')}
+    </div>`).join('');
+  $('#hlList').querySelectorAll('.hl-item').forEach(el => {
+    el.onclick = () => openArticle(
+      { id: el.dataset.aid, url: el.dataset.url, title: el.dataset.title }, +el.dataset.start);
+  });
 }
 
 // --- Seek by character position (for the whole-article progress bar + resume) ---

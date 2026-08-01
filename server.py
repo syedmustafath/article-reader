@@ -68,6 +68,20 @@ class ArticleRequest(BaseModel):
     url: str
 
 
+class HighlightRequest(BaseModel):
+    article_id: Optional[str] = None
+    url: Optional[str] = None
+    title: Optional[str] = None
+    start: int
+    end: int
+    quote: Optional[str] = ""
+    note: Optional[str] = ""
+
+
+class NoteUpdate(BaseModel):
+    note: str = ""
+
+
 def extract_article(url: str) -> tuple[str, str]:
     """Fetch a URL and return (title, clean_text)."""
     downloaded = trafilatura.fetch_url(url)
@@ -302,6 +316,58 @@ async def add_article(req: ArticleRequest):
 @app.delete("/api/articles/{article_id}")
 async def delete_article(article_id: str):
     await _supabase("DELETE", f"/articles?id=eq.{article_id}")
+    return {"ok": True}
+
+
+# --- Highlights & notes (Supabase-backed) ---
+# start_char/end_char are the columns; we expose them to the client as start/end.
+_HL_SELECT = "id,article_id,url,title,start:start_char,end:end_char,quote,note,created_at"
+
+
+def _alias_hl(row: dict) -> dict:
+    if "start_char" in row:
+        row["start"] = row.pop("start_char")
+    if "end_char" in row:
+        row["end"] = row.pop("end_char")
+    return row
+
+
+@app.get("/api/highlights")
+async def list_highlights(article_id: Optional[str] = None):
+    q = f"/highlights?select={_HL_SELECT}&order=created_at.asc"
+    if article_id:
+        q += f"&article_id=eq.{article_id}"
+    resp = await _supabase("GET", q)
+    return resp.json()
+
+
+@app.post("/api/highlights")
+async def add_highlight(req: HighlightRequest):
+    row = {
+        "article_id": req.article_id,
+        "url": req.url,
+        "title": req.title,
+        "start_char": req.start,
+        "end_char": req.end,
+        "quote": req.quote,
+        "note": req.note,
+    }
+    resp = await _supabase(
+        "POST", "/highlights", json=row, headers={"Prefer": "return=representation"}
+    )
+    created = resp.json()
+    return _alias_hl(created[0] if isinstance(created, list) else created)
+
+
+@app.patch("/api/highlights/{highlight_id}")
+async def update_highlight(highlight_id: str, req: NoteUpdate):
+    await _supabase("PATCH", f"/highlights?id=eq.{highlight_id}", json={"note": req.note})
+    return {"ok": True}
+
+
+@app.delete("/api/highlights/{highlight_id}")
+async def delete_highlight(highlight_id: str):
+    await _supabase("DELETE", f"/highlights?id=eq.{highlight_id}")
     return {"ok": True}
 
 
