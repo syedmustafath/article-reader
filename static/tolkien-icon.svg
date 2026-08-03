@@ -1,0 +1,20 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" fill="#2417cc"/>
+  <g fill="none" stroke="#ffffff" stroke-width="13" stroke-linecap="round" stroke-linejoin="round">
+    <!-- bowl opening -->
+    <ellipse cx="190" cy="252" rx="76" ry="30" transform="rotate(-20 190 252)"/>
+    <ellipse cx="190" cy="252" rx="46" ry="16" transform="rotate(-20 190 252)"/>
+    <!-- bowl body -->
+    <path d="M126 236 C108 306 128 362 192 378 C258 394 306 356 304 296"/>
+    <!-- stem rising to the mouthpiece -->
+    <path d="M258 232 C286 258 300 276 314 296 C336 262 366 214 400 172 C414 154 432 138 448 154 C460 166 450 186 432 200 C392 234 348 270 320 300"/>
+    <!-- band across the stem -->
+    <path d="M360 214 l30 30 M378 198 l30 30"/>
+    <!-- mouthpiece tip -->
+    <ellipse cx="442" cy="152" rx="17" ry="11" transform="rotate(42 442 152)"/>
+    <!-- shadow under the bowl -->
+    <ellipse cx="200" cy="398" rx="74" ry="12" stroke-width="9"/>
+    <!-- sparkles -->
+    <path d="M120 148 l10 36 M154 134 l0 36 M188 148 l-10 36" stroke-width="11"/>
+  </g>
+</svg>
