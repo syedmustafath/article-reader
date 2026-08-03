@@ -381,6 +381,15 @@
       <label class="switch"><input type="checkbox" id="hlToggle"><span class="track"></span></label>
     </div>
   </div>
+  <div class="field">
+    <div class="field-label">Background music</div>
+    <div class="switch-row">
+      <span>Mood music while reading</span>
+      <label class="switch"><input type="checkbox" id="musicToggle"><span class="track"></span></label>
+    </div>
+    <input id="musicVol" type="range" min="0" max="100" value="40"
+           style="width:100%; margin-top:14px; accent-color:var(--accent);">
+  </div>
   <button id="sheetDone" class="primary">Done</button>
 </div>
 
@@ -408,6 +417,11 @@ let CUR_BACK = 'list';    // which view the reader's back button returns to
 let CHAPTERS = [];        // chapters (TOC) of the open book, for chapter auto-advance
 let CUR_CH_IDX = 0;       // index of the open chapter within CHAPTERS
 let EDIT_HL = null;       // highlight currently open in the note sheet
+let musicOn = localStorage.getItem('nvr_music') === 'on';   // background mood music
+let musicVol = (parseInt(localStorage.getItem('nvr_musicvol')) || 40) / 100;
+let PARA_RANGES = [];     // paragraph char ranges of the open doc
+let PARA_MOODS = [];      // mood label per paragraph (from /api/moods)
+let lastParaIdx = -1;     // last paragraph whose mood we applied to the music
 const WPM_1X = 180;       // measured pace of the default voice (Andrew) at 1x
 const SPEEDS = [1.0, 1.1, 1.2, 1.25, 1.35, 1.5];  // finer steps, capped at 1.5x
 // default 1.25x, but remember the user's last-used speed across sessions
@@ -437,6 +451,127 @@ async function runJob(url, body) {
   }
   throw new Error('Timed out.');
 }
+
+// ============================================================
+//  BACKGROUND MOOD MUSIC — generative Web Audio (no files)
+// ============================================================
+const MoodMusic = (() => {
+  // per-mood musical params: root Hz, chord intervals (semitones), filter Hz, level, timbre
+  const P = {
+    neutral:    { root: 130.81, ivals: [0, 7, 12],      cutoff: 600,  level: 0.0,  wave: 'sine' },
+    calm:       { root: 130.81, ivals: [0, 7, 12, 16],  cutoff: 950,  level: 1.0,  wave: 'sine' },
+    hopeful:    { root: 146.83, ivals: [0, 4, 7, 11],   cutoff: 1500, level: 1.0,  wave: 'triangle' },
+    sad:        { root: 110.00, ivals: [0, 3, 7, 10],   cutoff: 650,  level: 0.95, wave: 'sine' },
+    tense:      { root: 123.47, ivals: [0, 1, 6, 7],    cutoff: 850,  level: 0.9,  wave: 'sawtooth' },
+    mysterious: { root: 116.54, ivals: [0, 2, 6, 10],   cutoff: 1050, level: 0.85, wave: 'triangle' },
+    epic:       { root: 98.00,  ivals: [0, 7, 12, 19],  cutoff: 1250, level: 1.0,  wave: 'sawtooth' },
+  };
+  let ctx, master, banks, current = 'neutral', running = false, vol = musicVol;
+
+  function reverb() {
+    const d = ctx.createDelay(1); d.delayTime.value = 0.3;
+    const fb = ctx.createGain(); fb.gain.value = 0.36;
+    const wet = ctx.createGain(); wet.gain.value = 0.45;
+    d.connect(fb); fb.connect(d); d.connect(wet);
+    return { input: d, output: wet };
+  }
+  function makeBank() {
+    const g = ctx.createGain(); g.gain.value = 0;
+    const filter = ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 700;
+    filter.connect(g);
+    const oscs = [];
+    for (let i = 0; i < 4; i++) {
+      const o = ctx.createOscillator(), og = ctx.createGain();
+      og.gain.value = 0; o.connect(og); og.connect(filter); o.start();
+      oscs.push({ o, og });
+    }
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.05;   // slow filter drift = movement
+    const lg = ctx.createGain(); lg.gain.value = 180;
+    lfo.connect(lg); lg.connect(filter.frequency); lfo.start();
+    return { g, filter, oscs };
+  }
+  function configure(bank, mood) {
+    const m = P[mood] || P.neutral, t = ctx.currentTime;
+    const freqs = m.ivals.map(s => m.root * Math.pow(2, s / 12));
+    bank.filter.frequency.setTargetAtTime(m.cutoff, t, 1.5);
+    bank.oscs.forEach((v, i) => {
+      v.o.type = m.wave;
+      v.o.frequency.setTargetAtTime(freqs[i % freqs.length], t, 1.2);
+      v.o.detune.setTargetAtTime((i - 1.5) * 4, t, 1);        // gentle chorus
+      v.og.gain.setTargetAtTime(m.level * 0.2, t, 2);
+    });
+  }
+  function ensure() {
+    if (ctx) return;
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value = 0;
+    const rev = reverb();
+    banks = [makeBank(), makeBank()];
+    banks.forEach(b => { b.g.connect(master); b.g.connect(rev.input); });
+    rev.output.connect(master);
+    master.connect(ctx.destination);
+    configure(banks[0], current); banks[0].g.gain.value = 1;
+  }
+  return {
+    start() {
+      ensure();
+      if (ctx.state === 'suspended') ctx.resume();
+      running = true;
+      master.gain.setTargetAtTime(vol, ctx.currentTime, 1.2);
+    },
+    stop() {
+      running = false;
+      if (ctx) master.gain.setTargetAtTime(0, ctx.currentTime, 0.7);
+    },
+    setVolume(v) {
+      vol = v;
+      if (ctx && running) master.gain.setTargetAtTime(v, ctx.currentTime, 0.3);
+    },
+    setMood(mood) {                                          // crossfade banks over ~3s
+      if (!ctx || !running || !P[mood] || mood === current) return;
+      current = mood;
+      const act = banks[0].g.gain.value >= banks[1].g.gain.value ? 0 : 1;
+      const idle = banks[act ? 0 : 1], t = ctx.currentTime;
+      configure(idle, mood);
+      idle.g.gain.setTargetAtTime(1, t, 1.6);
+      banks[act].g.gain.setTargetAtTime(0, t, 1.6);
+    },
+  };
+})();
+
+// Split the open doc into paragraph char-ranges, look up the mood of a position.
+function buildParagraphs() {
+  // paragraphs are newline-delimited (articles use \n, books use \n\n)
+  PARA_RANGES = []; PARA_MOODS = []; lastParaIdx = -1;
+  const re = /\n+/g; let last = 0, m;
+  while ((m = re.exec(TEXT))) {
+    if (m.index > last) PARA_RANGES.push({ start: last, end: m.index });
+    last = m.index + m[0].length;
+  }
+  if (last < TEXT.length) PARA_RANGES.push({ start: last, end: TEXT.length });
+}
+function paragraphIndexForChar(ch) {
+  let lo = 0, hi = PARA_RANGES.length - 1, ans = 0;
+  while (lo <= hi) { const mid = (lo + hi) >> 1; if (PARA_RANGES[mid].start <= ch) { ans = mid; lo = mid + 1; } else hi = mid - 1; }
+  return ans;
+}
+async function classifyMoods() {
+  if (!musicOn || !TEXT || !PARA_RANGES.length) return;
+  const snippets = PARA_RANGES.map(r => TEXT.slice(r.start, r.end).slice(0, 300));
+  const mine = genId;
+  try {
+    const res = await runJob('/api/moods', { doc_id: CUR_ID, doc_type: CUR_TYPE, paragraphs: snippets });
+    if (mine === genId && res.labels && res.labels.length === PARA_RANGES.length) PARA_MOODS = res.labels;
+  } catch (e) { /* leave the score neutral */ }
+}
+function updateMood() {                                       // called as narration advances
+  if (!musicOn || !running() || !PARA_MOODS.length || active < 0) return;
+  const marks = window._allMarks || [];
+  const ch = marks[active] ? marks[active].start : 0;
+  const pi = paragraphIndexForChar(ch);
+  if (pi !== lastParaIdx) { lastParaIdx = pi; MoodMusic.setMood(PARA_MOODS[pi] || 'neutral'); }
+}
+function running() { return !audio.paused; }
 
 // --- View switching ---
 function showView(v) {
@@ -516,6 +651,25 @@ $('#hlToggle').addEventListener('change', e => {
   highlightOn = e.target.checked;
   try { localStorage.setItem('nvr_highlight', highlightOn ? 'on' : 'off'); } catch (err) {}
   if (spans[active]) spans[active].classList.toggle('active', highlightOn);
+});
+
+// Background music toggle + volume (persisted)
+$('#musicToggle').checked = musicOn;
+$('#musicVol').value = Math.round(musicVol * 100);
+$('#musicToggle').addEventListener('change', e => {
+  musicOn = e.target.checked;
+  try { localStorage.setItem('nvr_music', musicOn ? 'on' : 'off'); } catch (err) {}
+  if (musicOn) {
+    if (TEXT) { if (!PARA_RANGES.length) buildParagraphs(); classifyMoods(); }
+    if (!audio.paused) { MoodMusic.start(); lastParaIdx = -1; updateMood(); }
+  } else {
+    MoodMusic.stop();
+  }
+});
+$('#musicVol').addEventListener('input', e => {
+  musicVol = (+e.target.value) / 100;
+  try { localStorage.setItem('nvr_musicvol', e.target.value); } catch (err) {}
+  MoodMusic.setVolume(musicVol);
 });
 
 // ============================================================
@@ -610,6 +764,7 @@ $('#back').onclick = () => {
   playing = -1;
   $('#player').classList.remove('on');
   $('#compass').classList.remove('show');
+  MoodMusic.stop();
   clearActive();
   if (CUR_BACK === 'list') loadList();   // refresh cards so the "% read" badge updates
   showView(CUR_BACK || 'list');
@@ -784,6 +939,7 @@ async function openArticle(item, seekChar) {
     ]);
     TEXT = data.text;
     totalWords = (TEXT.match(/\S+/g) || []).length;
+    buildParagraphs(); classifyMoods();   // paragraph moods for background music
     CHUNKS = data.chunks.map(c => ({ ...c, marks: null, audioUrl: null }));
     HIGHLIGHTS = hls || [];
     $('#title').textContent = item.title || data.title;
@@ -851,6 +1007,7 @@ audio.addEventListener('timeupdate', () => {
     if (highlightOn && spans[span]) spans[span].classList.add('active');
     active = span;
     updateCompass();      // no forced scroll — the compass offers to catch up
+    updateMood();         // shift the background score to this paragraph's mood
   }
   const frac = articleFrac();
   if (!dragging) {
@@ -1174,6 +1331,7 @@ async function openChapter(chapter, chapters, idx, seekChar) {
     ]);
     TEXT = data.text;
     totalWords = (TEXT.match(/\S+/g) || []).length;
+    buildParagraphs(); classifyMoods();   // paragraph moods for background music
     CHUNKS = data.chunks.map(c => ({ ...c, marks: null, audioUrl: null }));
     HIGHLIGHTS = hls || [];
     $('#title').textContent = chapter.title || data.title || 'Chapter';
@@ -1241,9 +1399,15 @@ window.addEventListener('pagehide', saveProgress);
 const ICON_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
 const ICON_PAUSE = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4.2" height="14" rx="1.2"/><rect x="13.8" y="5" width="4.2" height="14" rx="1.2"/></svg>';
 $('#play').innerHTML = ICON_PLAY;
-$('#play').onclick = () => audio.paused ? audio.play() : audio.pause();
+$('#play').onclick = () => {
+  if (audio.paused) audio.play();
+  else { audio.pause(); MoodMusic.stop(); }   // explicit pause stops the score
+};
 audio.addEventListener('play', () => $('#play').innerHTML = ICON_PAUSE);
 audio.addEventListener('pause', () => $('#play').innerHTML = ICON_PLAY);
+// 'playing' fires each time audio actually resumes (incl. part/chapter changes) —
+// keep the music going across those without dipping.
+audio.addEventListener('playing', () => { if (musicOn) { MoodMusic.start(); updateMood(); } });
 
 // Previous/next part. Prev restarts the current part if we're >3s in (podcast-style).
 $('#prev').onclick = () => {

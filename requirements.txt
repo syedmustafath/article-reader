@@ -6,3 +6,4 @@ httpx==0.28.1
 ebooklib==0.20
 beautifulsoup4==4.15.0
 python-multipart==0.0.32
+anthropic==0.120.2

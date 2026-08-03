@@ -32,6 +32,19 @@ return a clear 503.
 4. Set env vars `SUPABASE_URL` and `SUPABASE_KEY` — in Render (Environment tab)
    and locally (`export SUPABASE_URL=… SUPABASE_KEY=…`) for testing.
 
+## Background mood music (optional)
+
+Off by default; a toggle + volume live in the reader's settings. When on, each
+paragraph is labelled with a mood (Claude Haiku, cached per document) and the app
+plays a generative Web-Audio ambient score that crossfades between moods as
+narration advances. Set `ANTHROPIC_API_KEY` (Render env + local) to enable it; add
+the cache columns:
+
+```sql
+alter table articles add column moods jsonb;
+alter table book_chapters add column moods jsonb;
+```
+
 ## Setup
 
 ```bash

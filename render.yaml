@@ -16,3 +16,6 @@ services:
         sync: false
       - key: SUPABASE_KEY
         sync: false
+      # Paragraph mood classification for background music (Claude Haiku).
+      - key: ANTHROPIC_API_KEY
+        sync: false

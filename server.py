@@ -9,6 +9,8 @@ to character ranges so the frontend can highlight words in sync with the audio.
 """
 
 import asyncio
+import hashlib
+import json
 import os
 import re
 import tempfile
@@ -17,6 +19,7 @@ from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlparse
 
+import anthropic
 import ebooklib
 import edge_tts
 import httpx
@@ -34,6 +37,10 @@ BASE_DIR = Path(__file__).resolve().parent  # so static paths work regardless of
 # Supabase (reading-list storage). Set as env vars; endpoints 503 if missing.
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+
+# Anthropic (paragraph mood classification for background music).
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+MOODS = ["neutral", "calm", "tense", "sad", "hopeful", "mysterious", "epic"]
 
 # In-memory audio cache: id -> mp3 bytes. Cleared on restart; capped below.
 _AUDIO: dict[str, bytes] = {}
@@ -89,6 +96,12 @@ class NoteUpdate(BaseModel):
 
 class ChapterRequest(BaseModel):
     chapter_id: str
+
+
+class MoodsRequest(BaseModel):
+    doc_id: Optional[str] = None
+    doc_type: str = "article"           # 'article' | 'chapter'
+    paragraphs: list[str]
 
 
 def extract_article(url: str) -> tuple[str, str]:
@@ -151,6 +164,38 @@ def parse_epub(data: bytes) -> tuple[str, str, list[dict]]:
     if not chapters:
         raise HTTPException(422, "Could not extract any readable chapters from that EPUB.")
     return title, author, chapters
+
+
+async def classify_moods(paragraphs: list[str]) -> list[str]:
+    """Label each paragraph with one mood from MOODS, using Claude Haiku."""
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(503, "Background music not configured (set ANTHROPIC_API_KEY).")
+    numbered = "\n".join(f"{i}. {p[:200]}" for i, p in enumerate(paragraphs))
+    prompt = (
+        "You are scoring the paragraphs of a text so an app can play matching "
+        "background music. For EACH numbered paragraph choose the single best mood "
+        f"from exactly this list: {', '.join(MOODS)}. Judge the emotional tone; use "
+        "'neutral' when there is no strong mood.\n"
+        f"Return ONLY a JSON array of {len(paragraphs)} lowercase strings, one per "
+        "paragraph in order — no prose, no keys.\n\nParagraphs:\n" + numbered
+    )
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    msg = await client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=3000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text").strip()
+    match = re.search(r"\[.*\]", text, re.S)
+    try:
+        labels = json.loads(match.group(0)) if match else []
+    except Exception:
+        labels = []
+    out = []
+    for i in range(len(paragraphs)):
+        v = str(labels[i]).strip().lower() if i < len(labels) else "neutral"
+        out.append(v if v in MOODS else "neutral")
+    return out
 
 
 def split_units(text: str) -> list[tuple[int, int]]:
@@ -429,6 +474,38 @@ async def get_chapter(req: ChapterRequest):
 async def delete_book(book_id: str):
     await _supabase("DELETE", f"/books?id=eq.{book_id}")
     return {"ok": True}
+
+
+# --- Paragraph moods (for background music) ---
+@app.post("/api/moods")
+async def get_moods(req: MoodsRequest):
+    paras = req.paragraphs or []
+    table = "book_chapters" if req.doc_type == "chapter" else "articles"
+    digest = hashlib.sha256("\n".join(p[:200] for p in paras).encode()).hexdigest()
+
+    async def work():
+        if not paras:
+            return {"labels": []}
+        configured = bool(req.doc_id and SUPABASE_URL and SUPABASE_KEY)
+        if configured:                                   # cache hit?
+            try:
+                rows = (await _supabase("GET", f"/{table}?id=eq.{req.doc_id}&select=moods")).json()
+                cached = rows[0].get("moods") if rows else None
+                if cached and cached.get("hash") == digest \
+                        and len(cached.get("labels", [])) == len(paras):
+                    return {"labels": cached["labels"]}
+            except Exception:
+                pass
+        labels = await classify_moods(paras)
+        if configured:                                   # save for next time
+            try:
+                await _supabase("PATCH", f"/{table}?id=eq.{req.doc_id}",
+                                json={"moods": {"hash": digest, "labels": labels}})
+            except Exception:
+                pass
+        return {"labels": labels}
+
+    return {"job": start_job(work)}
 
 
 # --- Highlights & notes (Supabase-backed) ---
