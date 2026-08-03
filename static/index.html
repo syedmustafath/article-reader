@@ -180,6 +180,15 @@
   .hl-item-note { font-size: 14px; color: var(--muted); margin-top: 6px; }
   #hlListStatus { color: var(--muted); text-align: center; padding: 44px 20px; font-size: 15px; }
   #hlListStatus.err { color: #d0402a; }
+  /* Books + chapters */
+  #bookList, #chList { max-width: 720px; margin: 0 auto; }
+  .ch-item { display: flex; align-items: baseline; gap: 14px; padding: 15px 4px;
+             border-bottom: 1px solid var(--line); cursor: pointer; }
+  .ch-num { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 14px;
+            min-width: 22px; text-align: right; flex: none; }
+  .ch-title { font-size: 17px; line-height: 1.35; overflow-wrap: anywhere; }
+  #bookStatus, #chStatus { color: var(--muted); text-align: center; padding: 44px 20px; font-size: 15px; }
+  #bookStatus.err, #chStatus.err { color: #d0402a; }
   /* Welcome splash */
   #splash { position: fixed; inset: 0; z-index: 100; background: var(--brand);
             display: flex; align-items: center; justify-content: center; flex-direction: column;
@@ -220,6 +229,9 @@
     <div class="bar bar-between">
       <h1 class="app-title">Tolkien</h1>
       <div style="display:flex; gap:8px; align-items:center;">
+        <button id="booksBtn" class="icon" aria-label="Books">
+          <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h5v16H6a2 2 0 0 0-2 2V5z"/><path d="M20 5a2 2 0 0 0-2-2h-5v16h5a2 2 0 0 1 2 2V5z"/></svg>
+        </button>
         <button id="hlScreenBtn" class="icon" aria-label="Highlights">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>
         </button>
@@ -246,6 +258,39 @@
     <div id="hlListStatus"></div>
   </main>
 </div>
+
+<!-- ===== BOOKS VIEW ===== -->
+<div id="booksView" class="hidden">
+  <header>
+    <div class="bar bar-between">
+      <div style="display:flex; align-items:center;">
+        <button id="booksBack" class="icon" aria-label="Back to list">‹</button>
+        <h1 class="app-title" style="margin-left:4px;">Books</h1>
+      </div>
+      <button id="uploadBtn" class="primary">+ Upload</button>
+    </div>
+  </header>
+  <main>
+    <div id="bookList"></div>
+    <div id="bookStatus"></div>
+  </main>
+</div>
+
+<!-- ===== CHAPTERS (TOC) VIEW ===== -->
+<div id="chaptersView" class="hidden">
+  <header>
+    <div class="bar">
+      <button id="chBack" class="icon" aria-label="Back to books">‹</button>
+      <h1 class="app-title" id="chBookTitle" style="margin-left:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Book</h1>
+    </div>
+  </header>
+  <main>
+    <div id="chList"></div>
+    <div id="chStatus"></div>
+  </main>
+</div>
+
+<input id="epubInput" type="file" accept=".epub,application/epub+zip" style="display:none">
 
 <!-- ===== READER VIEW ===== -->
 <div id="readerView" class="hidden">
@@ -356,8 +401,12 @@ let CUR_ID = null;        // id of the open article, for resume
 let dragging = false;     // user is scrubbing the progress bar
 let lastSave = 0;         // throttle for resume-position saves
 let highlightOn = localStorage.getItem('nvr_highlight') !== 'off';  // reading-guide highlight
-let HIGHLIGHTS = [];      // user highlights for the open article: {id,start,end,quote,note,...}
-let CUR_URL = null, CUR_TITLE = null;   // open article context (for saving highlights)
+let HIGHLIGHTS = [];      // user highlights for the open doc: {id,start,end,quote,note,...}
+let CUR_URL = null, CUR_TITLE = null;   // open doc context (for saving highlights)
+let CUR_TYPE = 'article'; // 'article' | 'chapter'
+let CUR_BACK = 'list';    // which view the reader's back button returns to
+let CHAPTERS = [];        // chapters (TOC) of the open book, for chapter auto-advance
+let CUR_CH_IDX = 0;       // index of the open chapter within CHAPTERS
 let EDIT_HL = null;       // highlight currently open in the note sheet
 const WPM_1X = 180;       // measured pace of the default voice (Andrew) at 1x
 const SPEEDS = [1.0, 1.1, 1.2, 1.25, 1.35, 1.5];  // finer steps, capped at 1.5x
@@ -394,6 +443,8 @@ function showView(v) {
   $('#listView').classList.toggle('hidden', v !== 'list');
   $('#readerView').classList.toggle('hidden', v !== 'reader');
   $('#highlightsView').classList.toggle('hidden', v !== 'highlights');
+  $('#booksView').classList.toggle('hidden', v !== 'books');
+  $('#chaptersView').classList.toggle('hidden', v !== 'chapters');
 }
 
 // Direct JSON request for the fast highlight endpoints (Supabase ops are < 1s).
@@ -511,7 +562,7 @@ function renderList(items) {
   $('#list').innerHTML = items.map(cardHtml).join('');
   $('#list').querySelectorAll('.card').forEach(el => {
     const item = items.find(x => x.id === el.dataset.id);
-    el.querySelector('.card-main').onclick = () => openArticle(item);
+    el.querySelector('.card-main').onclick = () => { CUR_BACK = 'list'; openArticle(item); };
     el.querySelector('.del').onclick = () => deleteArticle(el.dataset.id, el);
   });
 }
@@ -560,8 +611,8 @@ $('#back').onclick = () => {
   $('#player').classList.remove('on');
   $('#compass').classList.remove('show');
   clearActive();
-  loadList();           // refresh cards so the "% read" badge updates
-  showView('list');
+  if (CUR_BACK === 'list') loadList();   // refresh cards so the "% read" badge updates
+  showView(CUR_BACK || 'list');
 };
 
 // ============================================================
@@ -677,7 +728,16 @@ async function playFrom(i, seekTime = 0) {
 // (an async gap here would get the play() blocked -> stuck on part 1).
 audio.addEventListener('ended', () => {
   const next = playing + 1;
-  if (next >= CHUNKS.length) { updateNote('Finished'); clearActive(); clearProgress(CUR_ID); return; }
+  if (next >= CHUNKS.length) {
+    clearActive(); clearProgress(CUR_ID);
+    // in a book, flow straight into the next chapter
+    if (CUR_TYPE === 'chapter' && CHAPTERS && CUR_CH_IDX + 1 < CHAPTERS.length) {
+      openChapter(CHAPTERS[CUR_CH_IDX + 1], CHAPTERS, CUR_CH_IDX + 1);
+    } else {
+      updateNote('Finished');
+    }
+    return;
+  }
   playing = next;
   const c = CHUNKS[next];
   if (c && c.audioUrl) {
@@ -707,6 +767,7 @@ async function openArticle(item, seekChar) {
   showView('reader');
   window.scrollTo(0, 0);
   genId++;
+  CUR_TYPE = 'article';
   CUR_ID = item.id; CUR_URL = item.url; CUR_TITLE = item.title;
   HIGHLIGHTS = [];
   $('#status').className = '';
@@ -877,13 +938,15 @@ async function createHighlight(withNote) {
   const quote = TEXT.slice(start, end);
   $('#selbar').classList.remove('show');
   window.getSelection().removeAllRanges();
-  const tmp = { id: 'tmp-' + Date.now(), article_id: CUR_ID, url: CUR_URL, title: CUR_TITLE,
-                start, end, quote, note: '' };
+  // a highlight belongs to either an article or a book chapter
+  const ref = CUR_TYPE === 'chapter'
+    ? { chapter_id: CUR_ID, title: CUR_TITLE }
+    : { article_id: CUR_ID, url: CUR_URL, title: CUR_TITLE };
+  const tmp = { id: 'tmp-' + Date.now(), ...ref, start, end, quote, note: '' };
   HIGHLIGHTS.push(tmp);
   renderArticle();
   try {
-    const row = await apiJSON('POST', '/api/highlights',
-      { article_id: CUR_ID, url: CUR_URL, title: CUR_TITLE, start, end, quote, note: '' });
+    const row = await apiJSON('POST', '/api/highlights', { ...ref, start, end, quote, note: '' });
     Object.assign(tmp, row);                 // adopt the real id
     renderArticle();
   } catch (e) {
@@ -960,24 +1023,174 @@ function renderHighlightsScreen(all) {
   $('#hlListStatus').textContent = '';
   const groups = new Map();
   all.forEach(h => {
-    if (!groups.has(h.article_id))
-      groups.set(h.article_id, { title: h.title, url: h.url, id: h.article_id, items: [] });
-    groups.get(h.article_id).items.push(h);
+    const key = h.chapter_id || h.article_id;   // group by whichever doc it belongs to
+    if (!groups.has(key))
+      groups.set(key, { title: h.title, url: h.url,
+                        article_id: h.article_id, chapter_id: h.chapter_id, items: [] });
+    groups.get(key).items.push(h);
   });
   $('#hlList').innerHTML = [...groups.values()].map(g => `
     <div class="hl-group">
-      <div class="hl-group-title">${escapeHtml(g.title || g.url || 'Article')}</div>
+      <div class="hl-group-title">${escapeHtml(g.title || g.url || 'Document')}</div>
       ${g.items.map(h => `
-        <div class="hl-item" data-aid="${escapeHtml(g.id)}" data-url="${escapeHtml(g.url || '')}"
+        <div class="hl-item" data-cid="${escapeHtml(g.chapter_id || '')}"
+             data-aid="${escapeHtml(g.article_id || '')}" data-url="${escapeHtml(g.url || '')}"
              data-title="${escapeHtml(g.title || '')}" data-start="${h.start}">
           <div class="hl-item-quote">${escapeHtml(h.quote || '')}</div>
           ${h.note ? `<div class="hl-item-note">${escapeHtml(h.note)}</div>` : ''}
         </div>`).join('')}
     </div>`).join('');
   $('#hlList').querySelectorAll('.hl-item').forEach(el => {
-    el.onclick = () => openArticle(
-      { id: el.dataset.aid, url: el.dataset.url, title: el.dataset.title }, +el.dataset.start);
+    el.onclick = () => {
+      CUR_BACK = 'highlights';
+      if (el.dataset.cid)
+        openChapter({ id: el.dataset.cid, title: el.dataset.title }, null, 0, +el.dataset.start);
+      else
+        openArticle({ id: el.dataset.aid, url: el.dataset.url, title: el.dataset.title }, +el.dataset.start);
+    };
   });
+}
+
+// ============================================================
+//  BOOKS (EPUB)
+// ============================================================
+$('#booksBtn').onclick = openBooksScreen;
+$('#booksBack').onclick = () => showView('list');
+$('#chBack').onclick = () => showView('books');
+
+async function openBooksScreen() {
+  showView('books');
+  window.scrollTo(0, 0);
+  $('#bookList').innerHTML = '';
+  $('#bookStatus').className = '';
+  $('#bookStatus').textContent = 'Loading…';
+  try { renderBooks(await apiJSON('GET', '/api/books')); }
+  catch (e) { $('#bookStatus').className = 'err'; $('#bookStatus').textContent = 'Error: ' + e.message; }
+}
+
+function renderBooks(books) {
+  if (!books.length) {
+    $('#bookList').innerHTML = '';
+    $('#bookStatus').textContent = 'No books yet. Tap “+ Upload” to add an EPUB.';
+    return;
+  }
+  $('#bookStatus').textContent = '';
+  $('#bookList').innerHTML = books.map(b => `
+    <div class="card" data-id="${escapeHtml(b.id)}">
+      <div class="card-main">
+        <div class="card-title">${escapeHtml(b.title || 'Untitled')}</div>
+        <div class="card-meta">${[escapeHtml(b.author || ''), (b.chapter_count || 0) + ' chapters']
+          .filter(Boolean).join(' · ')}</div>
+      </div>
+      <button class="del" aria-label="Delete">×</button>
+    </div>`).join('');
+  $('#bookList').querySelectorAll('.card').forEach(el => {
+    const book = books.find(x => x.id === el.dataset.id);
+    el.querySelector('.card-main').onclick = () => openBook(book);
+    el.querySelector('.del').onclick = () => deleteBook(el.dataset.id, el);
+  });
+}
+
+async function deleteBook(id, el) {
+  el.style.opacity = .4;
+  try { await apiJSON('DELETE', '/api/books/' + id); el.remove();
+        if (!$('#bookList').children.length) renderBooks([]); }
+  catch (e) { el.style.opacity = 1; alert('Could not delete: ' + e.message); }
+}
+
+// Upload an EPUB (multipart) via the job API.
+$('#uploadBtn').onclick = () => $('#epubInput').click();
+$('#epubInput').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  $('#bookStatus').className = '';
+  $('#bookStatus').textContent = 'Parsing “' + file.name + '”… this can take a moment.';
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const start = await fetch('/api/books', { method: 'POST', body: fd });
+    const s = await start.json();
+    if (!start.ok) throw new Error(s.detail || start.statusText);
+    for (let tries = 0; tries < 300; tries++) {
+      await new Promise(r => setTimeout(r, 700));
+      const j = await (await fetch('/api/job/' + s.job)).json();
+      if (j.status === 'done') break;
+      if (j.status === 'error') throw new Error(j.error);
+    }
+    renderBooks(await apiJSON('GET', '/api/books'));
+  } catch (err) {
+    $('#bookStatus').className = 'err';
+    $('#bookStatus').textContent = 'Error: ' + err.message;
+  }
+});
+
+// Open a book -> chapter list (table of contents)
+async function openBook(book) {
+  showView('chapters');
+  window.scrollTo(0, 0);
+  $('#chBookTitle').textContent = book.title || 'Book';
+  $('#chList').innerHTML = '';
+  $('#chStatus').className = '';
+  $('#chStatus').textContent = 'Loading…';
+  try {
+    const chapters = await apiJSON('GET', '/api/books/' + book.id + '/chapters');
+    CHAPTERS = chapters;
+    renderChapters(chapters);
+  } catch (e) { $('#chStatus').className = 'err'; $('#chStatus').textContent = 'Error: ' + e.message; }
+}
+
+function renderChapters(chapters) {
+  if (!chapters.length) { $('#chStatus').textContent = 'No chapters found.'; return; }
+  $('#chStatus').textContent = '';
+  $('#chList').innerHTML = chapters.map((c, i) => `
+    <div class="ch-item" data-idx="${i}">
+      <span class="ch-num">${i + 1}</span>
+      <span class="ch-title">${escapeHtml(c.title || 'Chapter ' + (i + 1))}</span>
+    </div>`).join('');
+  $('#chList').querySelectorAll('.ch-item').forEach(el => {
+    const i = +el.dataset.idx;
+    el.onclick = () => { CUR_BACK = 'chapters'; openChapter(chapters[i], chapters, i); };
+  });
+}
+
+// Open a chapter — reads exactly like an article.
+async function openChapter(chapter, chapters, idx, seekChar) {
+  showView('reader');
+  window.scrollTo(0, 0);
+  genId++;
+  CUR_TYPE = 'chapter';
+  CUR_ID = chapter.id; CUR_URL = null; CUR_TITLE = chapter.title;
+  CHAPTERS = chapters || [];
+  CUR_CH_IDX = idx || 0;
+  HIGHLIGHTS = [];
+  $('#status').className = ''; $('#status').textContent = 'Loading chapter…';
+  $('#title').classList.add('hidden'); $('#article').innerHTML = '';
+  $('#player').classList.remove('on'); $('#seek').value = 0; clearActive();
+  try {
+    const [data, hls] = await Promise.all([
+      runJob('/api/chapter', { chapter_id: chapter.id }),
+      apiJSON('GET', '/api/highlights?chapter_id=' + encodeURIComponent(chapter.id)).catch(() => [])
+    ]);
+    TEXT = data.text;
+    totalWords = (TEXT.match(/\S+/g) || []).length;
+    CHUNKS = data.chunks.map(c => ({ ...c, marks: null, audioUrl: null }));
+    HIGHLIGHTS = hls || [];
+    $('#title').textContent = chapter.title || data.title || 'Chapter';
+    $('#title').classList.remove('hidden');
+    $('#status').textContent = '';
+    renderArticle();
+    $('#player').classList.add('on');
+    updateTimeDisplay(0);
+    if (seekChar != null) { seekToChar(seekChar); scrollToChar(seekChar); }
+    else {
+      const resume = loadProgress(chapter.id);
+      if (resume > 0.01 && resume < 0.99) seekToChar(resume * TEXT.length);
+      else playFrom(0);
+    }
+  } catch (e) {
+    $('#status').className = 'err'; $('#status').textContent = 'Error: ' + e.message;
+  }
 }
 
 // --- Seek by character position (for the whole-article progress bar + resume) ---

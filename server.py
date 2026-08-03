@@ -11,15 +11,19 @@ to character ranges so the frontend can highlight words in sync with the audio.
 import asyncio
 import os
 import re
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlparse
 
+import ebooklib
 import edge_tts
 import httpx
 import trafilatura
-from fastapi import FastAPI, HTTPException
+from bs4 import BeautifulSoup
+from ebooklib import epub
+from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -70,6 +74,7 @@ class ArticleRequest(BaseModel):
 
 class HighlightRequest(BaseModel):
     article_id: Optional[str] = None
+    chapter_id: Optional[str] = None
     url: Optional[str] = None
     title: Optional[str] = None
     start: int
@@ -80,6 +85,10 @@ class HighlightRequest(BaseModel):
 
 class NoteUpdate(BaseModel):
     note: str = ""
+
+
+class ChapterRequest(BaseModel):
+    chapter_id: str
 
 
 def extract_article(url: str) -> tuple[str, str]:
@@ -95,6 +104,53 @@ def extract_article(url: str) -> tuple[str, str]:
     if meta and meta.title:
         title = meta.title
     return title, text.strip()
+
+
+def _chapter_text(html: bytes) -> tuple[Optional[str], str]:
+    """Extract (heading, paragraph_text) from one EPUB document's HTML."""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style"]):
+        tag.decompose()
+    heading = soup.find(["h1", "h2", "h3"])
+    title = heading.get_text(" ", strip=True) if heading else None
+    blocks = [b.get_text(" ", strip=True)
+              for b in soup.find_all(["p", "h1", "h2", "h3", "h4", "li", "blockquote"])]
+    blocks = [b for b in blocks if b]
+    text = "\n\n".join(blocks) if blocks else soup.get_text("\n", strip=True)
+    return title, text.strip()
+
+
+def parse_epub(data: bytes) -> tuple[str, str, list[dict]]:
+    """Parse EPUB bytes into (title, author, chapters=[{idx,title,text}]).
+    Chapters follow the spine (reading order); tiny front-matter is skipped."""
+    with tempfile.NamedTemporaryFile(suffix=".epub", delete=True) as tmp:
+        tmp.write(data)
+        tmp.flush()
+        book = epub.read_epub(tmp.name, options={"ignore_ncx": True})
+
+    def meta(field):
+        m = book.get_metadata("DC", field)
+        return m[0][0] if m else ""
+
+    title = meta("title") or "Untitled book"
+    author = meta("creator") or ""
+
+    chapters: list[dict] = []
+    for idref, _ in book.spine:
+        item = book.get_item_with_id(idref)
+        if not item or item.get_type() != ebooklib.ITEM_DOCUMENT:
+            continue
+        heading, text = _chapter_text(item.get_content())
+        if len(text) < 200:          # skip cover / nav / tiny sections
+            continue
+        chapters.append({
+            "idx": len(chapters),
+            "title": heading or f"Chapter {len(chapters) + 1}",
+            "text": text,
+        })
+    if not chapters:
+        raise HTTPException(422, "Could not extract any readable chapters from that EPUB.")
+    return title, author, chapters
 
 
 def split_units(text: str) -> list[tuple[int, int]]:
@@ -319,9 +375,67 @@ async def delete_article(article_id: str):
     return {"ok": True}
 
 
+# --- Books (EPUB) ---
+@app.get("/api/books")
+async def list_books():
+    resp = await _supabase("GET", "/books?select=*&order=added_at.desc")
+    return resp.json()
+
+
+@app.post("/api/books")
+async def add_book(file: UploadFile):
+    data = await file.read()
+
+    async def work():
+        title, author, chapters = await asyncio.to_thread(parse_epub, data)
+        resp = await _supabase(
+            "POST", "/books",
+            json={"title": title, "author": author, "chapter_count": len(chapters)},
+            headers={"Prefer": "return=representation"},
+        )
+        book = resp.json()[0]
+        rows = [{"book_id": book["id"], "idx": c["idx"], "title": c["title"], "text": c["text"]}
+                for c in chapters]
+        # insert chapters in batches to keep each request small
+        for i in range(0, len(rows), 20):
+            await _supabase("POST", "/book_chapters", json=rows[i:i + 20])
+        return book
+
+    return {"job": start_job(work)}
+
+
+@app.get("/api/books/{book_id}/chapters")
+async def list_chapters(book_id: str):
+    resp = await _supabase(
+        "GET", f"/book_chapters?book_id=eq.{book_id}&select=id,idx,title&order=idx.asc")
+    return resp.json()
+
+
+@app.post("/api/chapter")
+async def get_chapter(req: ChapterRequest):
+    async def work():
+        resp = await _supabase(
+            "GET", f"/book_chapters?id=eq.{req.chapter_id}&select=title,text")
+        rows = resp.json()
+        if not rows:
+            raise HTTPException(404, "Chapter not found.")
+        text = (rows[0].get("text") or "").strip()
+        return {"title": rows[0].get("title") or "", "text": text, "chunks": make_chunks(text)}
+
+    return {"job": start_job(work)}
+
+
+@app.delete("/api/books/{book_id}")
+async def delete_book(book_id: str):
+    await _supabase("DELETE", f"/books?id=eq.{book_id}")
+    return {"ok": True}
+
+
 # --- Highlights & notes (Supabase-backed) ---
 # start_char/end_char are the columns; we expose them to the client as start/end.
-_HL_SELECT = "id,article_id,url,title,start:start_char,end:end_char,quote,note,created_at"
+# A highlight belongs to either an article (article_id) or a book chapter (chapter_id).
+_HL_SELECT = ("id,article_id,chapter_id,url,title,"
+              "start:start_char,end:end_char,quote,note,created_at")
 
 
 def _alias_hl(row: dict) -> dict:
@@ -333,10 +447,12 @@ def _alias_hl(row: dict) -> dict:
 
 
 @app.get("/api/highlights")
-async def list_highlights(article_id: Optional[str] = None):
+async def list_highlights(article_id: Optional[str] = None, chapter_id: Optional[str] = None):
     q = f"/highlights?select={_HL_SELECT}&order=created_at.asc"
     if article_id:
         q += f"&article_id=eq.{article_id}"
+    if chapter_id:
+        q += f"&chapter_id=eq.{chapter_id}"
     resp = await _supabase("GET", q)
     return resp.json()
 
@@ -345,6 +461,7 @@ async def list_highlights(article_id: Optional[str] = None):
 async def add_highlight(req: HighlightRequest):
     row = {
         "article_id": req.article_id,
+        "chapter_id": req.chapter_id,
         "url": req.url,
         "title": req.title,
         "start_char": req.start,
