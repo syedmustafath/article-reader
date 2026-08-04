@@ -203,9 +203,19 @@
                    animation: swave 1s ease-in-out infinite; }
   @keyframes swave { 0%,100% { height: 12px; } 50% { height: 46px; } }
   .hidden { display: none; }
+
+  /* Brief confirmation toast (used by the share-to-Tolkien flow). */
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px);
+    z-index: 120; background: var(--brand); color: #fff; padding: 12px 18px;
+    border-radius: 999px; font-size: 15px; max-width: 88%; box-shadow: 0 8px 24px rgba(0,0,0,.22);
+    opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
 </style>
 </head>
 <body>
+
+<div id="toast"></div>
 
 <!-- Welcome splash: uses the brand GIF if present, else a clean animated fallback -->
 <div id="splash">
@@ -734,6 +744,12 @@ async function deleteArticle(id, el) {
   }
 }
 
+// Core: add a URL to the reading list. Returns the created article row (with title).
+// Shared by the "+ Add" sheet and the share-to-Tolkien landing handler.
+async function addUrl(url) {
+  return await runJob('/api/articles', { url: url.trim() });
+}
+
 async function addArticle() {
   const url = $('#addUrl').value.trim();
   if (!url) return;
@@ -741,7 +757,7 @@ async function addArticle() {
   $('#addSubmit').textContent = 'Adding…';
   $('#addErr').textContent = '';
   try {
-    await runJob('/api/articles', { url });
+    await addUrl(url);
     closeSheets();
     await loadList();
   } catch (e) {
@@ -1492,10 +1508,49 @@ document.addEventListener('keydown', e => {
   }
 });
 
+// --- Share to Tolkien ---
+// A shared article arrives as ?share=<url-or-text> (manifest share_target on
+// Android/desktop, or the iOS "Add to Tolkien" Shortcut). Add it silently and
+// confirm with a toast. Storage is Supabase, so it syncs to the installed PWA
+// even when iOS opens this in Safari rather than the standalone app.
+let toastTimer = null;
+function toast(msg, ms = 2600) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  if (ms) toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+// Pull the first http(s) URL out of a share payload (often "Title https://…").
+function firstUrl(str) {
+  if (!str) return null;
+  const m = String(str).match(/https?:\/\/[^\s]+/);
+  return m ? m[0] : null;
+}
+
+async function handleShare() {
+  const p = new URLSearchParams(location.search);
+  const url = firstUrl(p.get('share') || p.get('url') || p.get('text'));
+  if (!url) return false;
+  history.replaceState({}, '', '/');            // don't re-add on refresh
+  $('#splash').classList.add('hide');           // skip the splash wait
+  toast('Adding…', 0);
+  try {
+    const row = await addUrl(url);
+    toast('Added ✓ ' + ((row && row.title) || 'article'));
+    await loadList();
+  } catch (e) {
+    toast("Couldn't add — try again");
+  }
+  return true;
+}
+
 // --- Init ---
 MediaControls.init();
 showView('list');
 loadList();
+handleShare();
 setTimeout(() => $('#splash').classList.add('hide'), 1600);   // dismiss welcome splash
 </script>
 </body>

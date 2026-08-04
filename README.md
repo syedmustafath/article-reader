@@ -45,6 +45,32 @@ alter table articles add column moods jsonb;
 alter table book_chapters add column moods jsonb;
 ```
 
+## Share to Tolkien
+
+Send an article straight to your reading list from wherever you're reading it, via
+the OS share sheet. The app reads a shared URL from `?share=<url>` on load, adds it
+(same flow as "+ Add"), and shows a brief "Added ✓ <title>" toast. Because the list
+lives in Supabase, it syncs to your installed PWA even if the share opens in a plain
+browser tab.
+
+- **Android / desktop PWA:** built in — the app declares a Web Share
+  [`share_target`](https://developer.mozilla.org/docs/Web/Manifest/share_target) in
+  the manifest, so once installed, "Tolkien" appears in the native share sheet.
+- **iOS:** Safari doesn't support `share_target` for PWAs, so add a one-time Apple
+  **Shortcut** that appears in the share sheet:
+  1. Shortcuts app → **+** (new) → **Add Action**.
+  2. Search **Receive** → "Receive input from Share Sheet"; set the accepted types to
+     **URLs** and **Safari web pages**. Toggle **Show in Share Sheet** on.
+  3. Add action **Text** → type `https://YOUR-APP.onrender.com/?share=` then insert the
+     **Shortcut Input** variable right after the `=` (so it becomes
+     `…/?share=<the shared URL>`).
+  4. Add action **Open URLs** → pass it that **Text**.
+  5. Name it **Add to Tolkien** and save.
+
+  Replace `YOUR-APP.onrender.com` with your real Render hostname (find it in the Render
+  dashboard). Now: any app → Share → **Add to Tolkien** → it opens briefly, adds the
+  article, and it's waiting in your list.
+
 ## Setup
 
 ```bash
