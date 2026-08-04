@@ -765,6 +765,7 @@ $('#back').onclick = () => {
   $('#player').classList.remove('on');
   $('#compass').classList.remove('show');
   MoodMusic.stop();
+  MediaControls.clear();
   clearActive();
   if (CUR_BACK === 'list') loadList();   // refresh cards so the "% read" badge updates
   showView(CUR_BACK || 'list');
@@ -924,6 +925,7 @@ async function openArticle(item, seekChar) {
   genId++;
   CUR_TYPE = 'article';
   CUR_ID = item.id; CUR_URL = item.url; CUR_TITLE = item.title;
+  MediaControls.setMeta();   // now-playing card = article title
   HIGHLIGHTS = [];
   $('#status').className = '';
   $('#status').textContent = 'Extracting article…';
@@ -1014,6 +1016,7 @@ audio.addEventListener('timeupdate', () => {
     $('#seek').value = frac * 1000;      // progress across the whole article
     updateTimeDisplay(frac);
   }
+  MediaControls.position();               // feed the lock-screen scrubber
   if (Date.now() - lastSave > 4000) { lastSave = Date.now(); saveProgress(); }
 });
 
@@ -1318,6 +1321,7 @@ async function openChapter(chapter, chapters, idx, seekChar) {
   genId++;
   CUR_TYPE = 'chapter';
   CUR_ID = chapter.id; CUR_URL = null; CUR_TITLE = chapter.title;
+  MediaControls.setMeta();   // now-playing card = chapter title / book album
   CHAPTERS = chapters || [];
   CUR_CH_IDX = idx || 0;
   HIGHLIGHTS = [];
@@ -1395,29 +1399,79 @@ function clearProgress(id) { try { localStorage.removeItem(progKey(id)); } catch
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveProgress(); });
 window.addEventListener('pagehide', saveProgress);
 
+// --- Lock-screen / AirPods media controls (MediaSession API) ---
+// Makes the OS treat narration like a podcast app: a now-playing card on the
+// lock screen + Control Center (title / "Tolkien" / pipe artwork), and
+// hardware & earbud play-pause-skip routed through the same in-app controls
+// (skip = parts). All feature-detected so older browsers are unaffected.
+const MediaControls = {
+  ok: 'mediaSession' in navigator,
+  setMeta() {
+    if (!this.ok || !CUR_TITLE) return;
+    const album = CUR_TYPE === 'chapter' ? ($('#chBookTitle').textContent || '') : '';
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: CUR_TITLE,
+        artist: 'Tolkien',
+        album,
+        artwork: [
+          { src: '/static/tolkien-icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/static/tolkien-icon-512.png', sizes: '512x512', type: 'image/png' },
+        ],
+      });
+    } catch (e) {}
+  },
+  init() {
+    if (!this.ok) return;
+    const set = (a, fn) => { try { navigator.mediaSession.setActionHandler(a, fn); } catch (e) {} };
+    set('play', doPlay);
+    set('pause', doPause);
+    set('previoustrack', prevPart);
+    set('nexttrack', nextPart);
+  },
+  state(s) { if (this.ok) { try { navigator.mediaSession.playbackState = s; } catch (e) {} } },
+  position() {
+    if (!this.ok || !navigator.mediaSession.setPositionState) return;
+    const d = audio.duration;
+    if (!isFinite(d) || d <= 0) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: d, position: Math.min(audio.currentTime, d), playbackRate: RATE || 1,
+      });
+    } catch (e) {}
+  },
+  clear() {
+    if (!this.ok) return;
+    try { navigator.mediaSession.metadata = null; } catch (e) {}
+    this.state('none');
+  },
+};
+
 // --- Controls ---
 const ICON_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
 const ICON_PAUSE = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4.2" height="14" rx="1.2"/><rect x="13.8" y="5" width="4.2" height="14" rx="1.2"/></svg>';
 $('#play').innerHTML = ICON_PLAY;
-$('#play').onclick = () => {
-  if (audio.paused) audio.play();
-  else { audio.pause(); MoodMusic.stop(); }   // explicit pause stops the score
-};
-audio.addEventListener('play', () => $('#play').innerHTML = ICON_PAUSE);
-audio.addEventListener('pause', () => $('#play').innerHTML = ICON_PLAY);
+// Shared play/pause + skip bodies so the in-app buttons, keyboard Space, and the
+// lock-screen / AirPods controls all go through one path (MoodMusic never desyncs).
+function doPlay() { audio.play(); }
+function doPause() { audio.pause(); MoodMusic.stop(); }   // explicit pause stops the score
+function prevPart() {   // podcast-style: restart the current part if we're >3s in
+  if (playing < 0) return;
+  if (audio.currentTime > 3 || playing === 0) { audio.currentTime = 0; audio.play(); }
+  else playFrom(playing - 1);
+}
+function nextPart() {
+  if (playing >= 0 && playing + 1 < CHUNKS.length) playFrom(playing + 1);
+}
+$('#play').onclick = () => { if (audio.paused) doPlay(); else doPause(); };
+audio.addEventListener('play', () => { $('#play').innerHTML = ICON_PAUSE; MediaControls.state('playing'); });
+audio.addEventListener('pause', () => { $('#play').innerHTML = ICON_PLAY; MediaControls.state('paused'); });
 // 'playing' fires each time audio actually resumes (incl. part/chapter changes) —
 // keep the music going across those without dipping.
 audio.addEventListener('playing', () => { if (musicOn) { MoodMusic.start(); updateMood(); } });
 
-// Previous/next part. Prev restarts the current part if we're >3s in (podcast-style).
-$('#prev').onclick = () => {
-  if (playing < 0) return;
-  if (audio.currentTime > 3 || playing === 0) { audio.currentTime = 0; audio.play(); }
-  else playFrom(playing - 1);
-};
-$('#next').onclick = () => {
-  if (playing >= 0 && playing + 1 < CHUNKS.length) playFrom(playing + 1);
-};
+$('#prev').onclick = prevPart;
+$('#next').onclick = nextPart;
 function updateTransport() {
   $('#prev').disabled = playing < 0;
   $('#next').disabled = !(playing >= 0 && playing + 1 < CHUNKS.length);
@@ -1439,6 +1493,7 @@ document.addEventListener('keydown', e => {
 });
 
 // --- Init ---
+MediaControls.init();
 showView('list');
 loadList();
 setTimeout(() => $('#splash').classList.add('hide'), 1600);   // dismiss welcome splash
