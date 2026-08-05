@@ -14,6 +14,7 @@ import json
 import os
 import re
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Callable, Optional
@@ -26,7 +27,7 @@ import httpx
 import trafilatura
 from bs4 import BeautifulSoup
 from ebooklib import epub
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -36,7 +37,8 @@ BASE_DIR = Path(__file__).resolve().parent  # so static paths work regardless of
 
 # Supabase (reading-list storage). Set as env vars; endpoints 503 if missing.
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")          # service_role (server-only)
+SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")  # public; used for auth + frontend
 
 # Anthropic (paragraph mood classification for background music).
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -286,6 +288,54 @@ def _cache_audio(data: bytes) -> str:
     return audio_id
 
 
+# --- Auth (Supabase Auth / Google) ---
+# The frontend signs in with Google via Supabase Auth and sends the resulting
+# access token as `Authorization: Bearer <token>`. We validate it against
+# Supabase's own auth server (robust across signing schemes) and cache the
+# result briefly so the 500ms job-poll loop stays cheap.
+_TOKEN_CACHE: dict[str, tuple] = {}   # token -> (user, expiry_epoch)
+_TOKEN_TTL = 300
+
+
+async def verify_token(token: str) -> dict:
+    """Validate a Supabase access token; return {id, email}. Cached ~5 min."""
+    now = time.time()
+    hit = _TOKEN_CACHE.get(token)
+    if hit and hit[1] > now:
+        return hit[0]
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        raise HTTPException(503, "Auth is not configured (set SUPABASE_URL/SUPABASE_ANON_KEY).")
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"},
+        )
+    if resp.status_code != 200:
+        raise HTTPException(401, "Not signed in.")
+    u = resp.json()
+    user = {"id": u.get("id"), "email": u.get("email")}
+    if not user["id"]:
+        raise HTTPException(401, "Not signed in.")
+    # Allowlist hook: to restrict access later, reject here unless
+    # user["email"] is in an approved set, e.g.:
+    #   if user["email"] not in ALLOWED_EMAILS: raise HTTPException(403, "Not invited.")
+    _TOKEN_CACHE[token] = (user, now + _TOKEN_TTL)
+    return user
+
+
+async def current_user(authorization: str = Header(None)) -> dict:
+    """FastAPI dependency: the signed-in user, or 401."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(401, "Not signed in.")
+    return await verify_token(authorization[7:].strip())
+
+
+@app.get("/api/config")
+def config():
+    """Public config so the frontend can init its Supabase Auth client."""
+    return {"supabase_url": SUPABASE_URL, "supabase_anon_key": SUPABASE_ANON_KEY}
+
+
 # --- Background jobs ---
 # Render fronts the app with Cloudflare, whose edge resets any HTTP/2 request
 # where the origin takes longer than ~1s to respond (edge-tts and slow article
@@ -297,32 +347,33 @@ _JOB_ORDER: list[str] = []
 _MAX_JOBS = 500
 
 
-def start_job(work: Callable) -> str:
-    """Schedule async `work()` in the background; return a job id at once."""
+def start_job(work: Callable, uid: str) -> str:
+    """Schedule async `work()` in the background; return a job id at once.
+    The owning user id is stored so only that user can poll the result."""
     job_id = uuid.uuid4().hex
-    _JOBS[job_id] = {"status": "pending"}
+    _JOBS[job_id] = {"status": "pending", "user_id": uid}
     _JOB_ORDER.append(job_id)
     while len(_JOB_ORDER) > _MAX_JOBS:
         _JOBS.pop(_JOB_ORDER.pop(0), None)
 
     async def runner():
         try:
-            _JOBS[job_id] = {"status": "done", "result": await work()}
+            _JOBS[job_id] = {"status": "done", "result": await work(), "user_id": uid}
         except HTTPException as e:
-            _JOBS[job_id] = {"status": "error", "error": e.detail}
+            _JOBS[job_id] = {"status": "error", "error": e.detail, "user_id": uid}
         except Exception as e:  # report instead of crashing the worker
-            _JOBS[job_id] = {"status": "error", "error": str(e)}
+            _JOBS[job_id] = {"status": "error", "error": str(e), "user_id": uid}
 
     asyncio.create_task(runner())
     return job_id
 
 
 @app.get("/api/job/{job_id}")
-def get_job(job_id: str):
+def get_job(job_id: str, user: dict = Depends(current_user)):
     job = _JOBS.get(job_id)
-    if job is None:
+    if job is None or job.get("user_id") != user["id"]:   # 404, don't leak others' jobs
         raise HTTPException(404, "Job expired. Try again.")
-    return job
+    return {k: v for k, v in job.items() if k != "user_id"}
 
 
 @app.get("/api/voices")
@@ -331,7 +382,7 @@ def get_voices():
 
 
 @app.post("/api/extract")
-async def extract(req: ExtractRequest):
+async def extract(req: ExtractRequest, user: dict = Depends(current_user)):
     if not req.url and not (req.text and req.text.strip()):
         raise HTTPException(400, "Provide either a url or text.")
 
@@ -342,11 +393,11 @@ async def extract(req: ExtractRequest):
             title, text = "Pasted text", req.text.strip()
         return {"title": title, "text": text, "chunks": make_chunks(text)}
 
-    return {"job": start_job(work)}
+    return {"job": start_job(work, user["id"])}
 
 
 @app.post("/api/tts")
-async def tts(req: TTSRequest):
+async def tts(req: TTSRequest, user: dict = Depends(current_user)):
     if not req.text.strip():
         raise HTTPException(400, "Empty text.")
     voice = req.voice if req.voice in _VOICE_IDS else VOICES[0]["id"]
@@ -355,7 +406,7 @@ async def tts(req: TTSRequest):
         audio, marks = await synthesize(req.text, voice)
         return {"audio_url": f"/audio/{_cache_audio(audio)}.mp3", "marks": marks}
 
-    return {"job": start_job(work)}
+    return {"job": start_job(work, user["id"])}
 
 
 @app.get("/audio/{audio_id}.mp3")
@@ -385,13 +436,14 @@ async def _supabase(method: str, path: str, **kwargs) -> httpx.Response:
 
 
 @app.get("/api/articles")
-async def list_articles():
-    resp = await _supabase("GET", "/articles?select=*&order=added_at.desc")
+async def list_articles(user: dict = Depends(current_user)):
+    resp = await _supabase(
+        "GET", f"/articles?select=*&user_id=eq.{user['id']}&order=added_at.desc")
     return resp.json()
 
 
 @app.post("/api/articles")
-async def add_article(req: ArticleRequest):
+async def add_article(req: ArticleRequest, user: dict = Depends(current_user)):
     url = req.url.strip()
     if not url:
         raise HTTPException(400, "Provide a url.")
@@ -399,6 +451,7 @@ async def add_article(req: ArticleRequest):
     async def work():
         title, text = await asyncio.to_thread(extract_article, url)
         row = {
+            "user_id": user["id"],
             "url": url,
             "title": title,
             "domain": urlparse(url).hostname or "",
@@ -411,76 +464,84 @@ async def add_article(req: ArticleRequest):
         created = resp.json()
         return created[0] if isinstance(created, list) else created
 
-    return {"job": start_job(work)}
+    return {"job": start_job(work, user["id"])}
 
 
 @app.delete("/api/articles/{article_id}")
-async def delete_article(article_id: str):
-    await _supabase("DELETE", f"/articles?id=eq.{article_id}")
+async def delete_article(article_id: str, user: dict = Depends(current_user)):
+    await _supabase("DELETE", f"/articles?id=eq.{article_id}&user_id=eq.{user['id']}")
     return {"ok": True}
 
 
 # --- Books (EPUB) ---
 @app.get("/api/books")
-async def list_books():
-    resp = await _supabase("GET", "/books?select=*&order=added_at.desc")
+async def list_books(user: dict = Depends(current_user)):
+    resp = await _supabase(
+        "GET", f"/books?select=*&user_id=eq.{user['id']}&order=added_at.desc")
     return resp.json()
 
 
 @app.post("/api/books")
-async def add_book(file: UploadFile):
+async def add_book(file: UploadFile, user: dict = Depends(current_user)):
     data = await file.read()
+    uid = user["id"]
 
     async def work():
         title, author, chapters = await asyncio.to_thread(parse_epub, data)
         resp = await _supabase(
             "POST", "/books",
-            json={"title": title, "author": author, "chapter_count": len(chapters)},
+            json={"user_id": uid, "title": title, "author": author,
+                  "chapter_count": len(chapters)},
             headers={"Prefer": "return=representation"},
         )
         book = resp.json()[0]
-        rows = [{"book_id": book["id"], "idx": c["idx"], "title": c["title"], "text": c["text"]}
-                for c in chapters]
+        rows = [{"user_id": uid, "book_id": book["id"], "idx": c["idx"],
+                 "title": c["title"], "text": c["text"]} for c in chapters]
         # insert chapters in batches to keep each request small
         for i in range(0, len(rows), 20):
             await _supabase("POST", "/book_chapters", json=rows[i:i + 20])
         return book
 
-    return {"job": start_job(work)}
+    return {"job": start_job(work, uid)}
 
 
 @app.get("/api/books/{book_id}/chapters")
-async def list_chapters(book_id: str):
+async def list_chapters(book_id: str, user: dict = Depends(current_user)):
     resp = await _supabase(
-        "GET", f"/book_chapters?book_id=eq.{book_id}&select=id,idx,title&order=idx.asc")
+        "GET", f"/book_chapters?book_id=eq.{book_id}&user_id=eq.{user['id']}"
+               "&select=id,idx,title&order=idx.asc")
     return resp.json()
 
 
 @app.post("/api/chapter")
-async def get_chapter(req: ChapterRequest):
+async def get_chapter(req: ChapterRequest, user: dict = Depends(current_user)):
+    uid = user["id"]
+
     async def work():
         resp = await _supabase(
-            "GET", f"/book_chapters?id=eq.{req.chapter_id}&select=title,text")
+            "GET", f"/book_chapters?id=eq.{req.chapter_id}&user_id=eq.{uid}&select=title,text")
         rows = resp.json()
         if not rows:
             raise HTTPException(404, "Chapter not found.")
         text = (rows[0].get("text") or "").strip()
         return {"title": rows[0].get("title") or "", "text": text, "chunks": make_chunks(text)}
 
-    return {"job": start_job(work)}
+    return {"job": start_job(work, uid)}
 
 
 @app.delete("/api/books/{book_id}")
-async def delete_book(book_id: str):
-    await _supabase("DELETE", f"/books?id=eq.{book_id}")
+async def delete_book(book_id: str, user: dict = Depends(current_user)):
+    await _supabase("DELETE", f"/books?id=eq.{book_id}&user_id=eq.{user['id']}")
     return {"ok": True}
 
 
 # --- Paragraph moods (for background music) ---
 @app.post("/api/moods")
-async def get_moods(req: MoodsRequest):
+async def get_moods(req: MoodsRequest, user: dict = Depends(current_user)):
     paras = req.paragraphs or []
+    uid = user["id"]
     table = "book_chapters" if req.doc_type == "chapter" else "articles"
+    scope = f"id=eq.{req.doc_id}&user_id=eq.{uid}"
     digest = hashlib.sha256("\n".join(p[:200] for p in paras).encode()).hexdigest()
 
     async def work():
@@ -489,7 +550,7 @@ async def get_moods(req: MoodsRequest):
         configured = bool(req.doc_id and SUPABASE_URL and SUPABASE_KEY)
         if configured:                                   # cache hit?
             try:
-                rows = (await _supabase("GET", f"/{table}?id=eq.{req.doc_id}&select=moods")).json()
+                rows = (await _supabase("GET", f"/{table}?{scope}&select=moods")).json()
                 cached = rows[0].get("moods") if rows else None
                 if cached and cached.get("hash") == digest \
                         and len(cached.get("labels", [])) == len(paras):
@@ -499,13 +560,13 @@ async def get_moods(req: MoodsRequest):
         labels = await classify_moods(paras)
         if configured:                                   # save for next time
             try:
-                await _supabase("PATCH", f"/{table}?id=eq.{req.doc_id}",
+                await _supabase("PATCH", f"/{table}?{scope}",
                                 json={"moods": {"hash": digest, "labels": labels}})
             except Exception:
                 pass
         return {"labels": labels}
 
-    return {"job": start_job(work)}
+    return {"job": start_job(work, uid)}
 
 
 # --- Highlights & notes (Supabase-backed) ---
@@ -524,8 +585,9 @@ def _alias_hl(row: dict) -> dict:
 
 
 @app.get("/api/highlights")
-async def list_highlights(article_id: Optional[str] = None, chapter_id: Optional[str] = None):
-    q = f"/highlights?select={_HL_SELECT}&order=created_at.asc"
+async def list_highlights(article_id: Optional[str] = None, chapter_id: Optional[str] = None,
+                          user: dict = Depends(current_user)):
+    q = f"/highlights?select={_HL_SELECT}&user_id=eq.{user['id']}&order=created_at.asc"
     if article_id:
         q += f"&article_id=eq.{article_id}"
     if chapter_id:
@@ -535,8 +597,9 @@ async def list_highlights(article_id: Optional[str] = None, chapter_id: Optional
 
 
 @app.post("/api/highlights")
-async def add_highlight(req: HighlightRequest):
+async def add_highlight(req: HighlightRequest, user: dict = Depends(current_user)):
     row = {
+        "user_id": user["id"],
         "article_id": req.article_id,
         "chapter_id": req.chapter_id,
         "url": req.url,
@@ -554,14 +617,16 @@ async def add_highlight(req: HighlightRequest):
 
 
 @app.patch("/api/highlights/{highlight_id}")
-async def update_highlight(highlight_id: str, req: NoteUpdate):
-    await _supabase("PATCH", f"/highlights?id=eq.{highlight_id}", json={"note": req.note})
+async def update_highlight(highlight_id: str, req: NoteUpdate,
+                           user: dict = Depends(current_user)):
+    await _supabase("PATCH", f"/highlights?id=eq.{highlight_id}&user_id=eq.{user['id']}",
+                    json={"note": req.note})
     return {"ok": True}
 
 
 @app.delete("/api/highlights/{highlight_id}")
-async def delete_highlight(highlight_id: str):
-    await _supabase("DELETE", f"/highlights?id=eq.{highlight_id}")
+async def delete_highlight(highlight_id: str, user: dict = Depends(current_user)):
+    await _supabase("DELETE", f"/highlights?id=eq.{highlight_id}&user_id=eq.{user['id']}")
     return {"ok": True}
 
 

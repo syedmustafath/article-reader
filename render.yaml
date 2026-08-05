@@ -14,7 +14,9 @@ services:
       # (Environment tab) — sync:false keeps the secrets out of the repo.
       - key: SUPABASE_URL
         sync: false
-      - key: SUPABASE_KEY
+      - key: SUPABASE_KEY          # service_role (server-only)
+        sync: false
+      - key: SUPABASE_ANON_KEY     # public anon key; used for auth + sent to the frontend
         sync: false
       # Paragraph mood classification for background music (Claude Haiku).
       - key: ANTHROPIC_API_KEY

@@ -32,6 +32,49 @@ return a clear 503.
 4. Set env vars `SUPABASE_URL` and `SUPABASE_KEY` — in Render (Environment tab)
    and locally (`export SUPABASE_URL=… SUPABASE_KEY=…`) for testing.
 
+## Accounts (Google sign-in + per-user libraries)
+
+Users sign in with Google (via Supabase Auth); every article/book/highlight is
+scoped to the signed-in user, so each account only sees its own library. The
+backend validates each request's token against Supabase's `/auth/v1/user` and
+scopes every query by `user_id`; the frontend gates the whole app behind a
+"Continue with Google" screen.
+
+**Setup (one-time):**
+
+1. **Google Cloud** → create an OAuth 2.0 **Web** client (+ configure the consent
+   screen). Authorized redirect URI:
+   `https://<project-ref>.supabase.co/auth/v1/callback`.
+2. **Supabase dashboard** → Authentication → Providers → **Google**: enable and paste
+   the Client ID / Secret. Under Authentication → URL Configuration, set the **Site
+   URL** and add the app's URL to **Redirect URLs**.
+3. **Env** → set `SUPABASE_ANON_KEY` (Supabase Settings → API → *anon* public key) in
+   Render and locally. `SUPABASE_KEY` stays the secret **service_role** key.
+4. **SQL** (Supabase editor) — add ownership + a safety net:
+   ```sql
+   alter table articles      add column user_id uuid references auth.users(id) on delete cascade;
+   alter table books         add column user_id uuid references auth.users(id) on delete cascade;
+   alter table book_chapters add column user_id uuid references auth.users(id) on delete cascade;
+   alter table highlights    add column user_id uuid references auth.users(id) on delete cascade;
+   create index on articles(user_id); create index on books(user_id);
+   create index on book_chapters(user_id); create index on highlights(user_id);
+   alter table articles enable row level security;
+   alter table books enable row level security;
+   alter table book_chapters enable row level security;
+   alter table highlights enable row level security;
+   ```
+5. **Claim your existing library** — after you sign in once, copy your UUID from
+   Authentication → Users and run:
+   ```sql
+   update articles      set user_id = '<YOUR_UUID>' where user_id is null;
+   update books         set user_id = '<YOUR_UUID>' where user_id is null;
+   update book_chapters set user_id = '<YOUR_UUID>' where user_id is null;
+   update highlights    set user_id = '<YOUR_UUID>' where user_id is null;
+   ```
+
+Access is open to **any Google account**. To restrict it later, add an email
+allowlist check in `current_user` (see the hook comment in `server.py`).
+
 ## Background mood music (optional)
 
 Off by default; a toggle + volume live in the reader's settings. When on, each
