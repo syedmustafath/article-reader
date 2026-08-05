@@ -54,6 +54,7 @@
   #list { max-width: 720px; margin: 0 auto; }
   .card { display: flex; align-items: stretch; border: 1px solid var(--line);
           border-radius: 14px; margin-bottom: 12px; background: var(--panel); overflow: hidden; }
+  .card-thumb { width: 76px; flex: none; background-size: cover; background-position: center; }
   .card-main { flex: 1; padding: 15px 16px; cursor: pointer; min-width: 0; }
   .card-title { font-size: 17px; font-weight: 650; line-height: 1.3; margin-bottom: 5px;
                 overflow-wrap: anywhere; }
@@ -64,6 +65,9 @@
   #listStatus.err { color: #d0402a; }
 
   /* Reader view */
+  #hero { width: 100%; height: 160px; border-radius: 14px; margin: 4px 0 20px;
+          background-size: cover; background-position: center;
+          box-shadow: inset 0 0 0 1px rgba(0,0,0,.06); }
   #back { font-size: 28px; line-height: 1; }
   #title { font-family: -apple-system, system-ui, sans-serif; font-size: 27px;
            font-weight: 800; line-height: 1.22; margin: 0 0 22px; letter-spacing: -.01em; }
@@ -312,6 +316,7 @@
     </div>
   </header>
   <main>
+    <div id="hero" class="hidden"></div>
     <h1 id="title" class="hidden"></h1>
     <div id="status"></div>
     <div id="article"></div>
@@ -440,6 +445,108 @@ let RATE = (() => { const v = parseFloat(localStorage.getItem('nvr_rate')); retu
 const escapeHtml = s => String(s).replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const plain = s => escapeHtml(s).replace(/\n{2,}/g, '</p><p>').replace(/\n/g, ' ');
+
+// --- Generative placeholders ---
+// A deterministic muted/editorial gradient + film-grain image per document,
+// seeded by its id — so a list card, the reader hero, and the lock-screen
+// artwork all share one identity. Drawn on canvas, memoized by seed@size.
+const Placeholder = (() => {
+  // Curated muted / editorial palettes (desaturated, mid-dark) {a,b,accent}.
+  const PALETTES = [
+    { a: '#3b4252', b: '#5e6b7e', accent: '#97a3b4' }, // slate
+    { a: '#463a4f', b: '#6d5a72', accent: '#a48fa8' }, // plum
+    { a: '#37423a', b: '#566b57', accent: '#8aa088' }, // moss
+    { a: '#4e3f38', b: '#7a5f50', accent: '#b1917c' }, // clay
+    { a: '#2f3a4a', b: '#4d5e73', accent: '#8598ac' }, // dusk-blue
+    { a: '#4a3b3f', b: '#74595f', accent: '#ab8990' }, // ash-rose
+    { a: '#2f4442', b: '#4f6b64', accent: '#86a39b' }, // teal-slate
+    { a: '#393b52', b: '#575a78', accent: '#9195b4' }, // indigo-ash
+    { a: '#46402f', b: '#6e6144', accent: '#a89774' }, // ochre
+    { a: '#383e44', b: '#5a636b', accent: '#93a0a8' }, // storm
+  ];
+  function hashStr(s) {                       // xmur3-style string -> uint32
+    s = String(s);
+    let h = 1779033703 ^ s.length;
+    for (let i = 0; i < s.length; i++) {
+      h = Math.imul(h ^ s.charCodeAt(i), 3432918353);
+      h = (h << 13) | (h >>> 19);
+    }
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    return (h ^ (h >>> 16)) >>> 0;
+  }
+  function mulberry32(a) {                     // seeded RNG
+    return () => {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  let _grain = null;
+  function grainTile() {                       // one grayscale-noise tile, reused
+    if (_grain) return _grain;
+    const n = 128, c = document.createElement('canvas');
+    c.width = c.height = n;
+    const ctx = c.getContext('2d');
+    const img = ctx.createImageData(n, n);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const v = (Math.random() * 255) | 0;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    return (_grain = c);
+  }
+  const cache = new Map();
+  function art(seed, w, h) {
+    const key = seed + '@' + w + 'x' + h;
+    if (cache.has(key)) return cache.get(key);
+    const hash = hashStr(seed);
+    const rnd = mulberry32(hash);
+    const pal = PALETTES[hash % PALETTES.length];
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    const cx = w / 2, cy = h / 2, R = Math.max(w, h);
+    // diagonal gradient at a seed-derived angle
+    const ang = rnd() * Math.PI * 2;
+    const g = ctx.createLinearGradient(
+      cx - Math.cos(ang) * R, cy - Math.sin(ang) * R,
+      cx + Math.cos(ang) * R, cy + Math.sin(ang) * R);
+    g.addColorStop(0, pal.a); g.addColorStop(1, pal.b);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+    // soft radial highlight for depth (mesh-ish)
+    const hx = w * (0.2 + rnd() * 0.6), hy = h * (0.15 + rnd() * 0.5);
+    const rg = ctx.createRadialGradient(hx, hy, 0, hx, hy, R * 0.85);
+    rg.addColorStop(0, pal.accent); rg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = 0.35; ctx.fillStyle = rg; ctx.fillRect(0, 0, w, h);
+    ctx.globalAlpha = 1;
+    // film grain
+    const tile = grainTile();
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.globalAlpha = 0.16;
+    for (let y = 0; y < h; y += tile.height)
+      for (let x = 0; x < w; x += tile.width) ctx.drawImage(tile, x, y);
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    // vignette
+    const vg = ctx.createRadialGradient(cx, cy, Math.min(w, h) * 0.3, cx, cy, R * 0.75);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.28)');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, w, h);
+    const url = c.toDataURL('image/png');
+    cache.set(key, url);
+    return url;
+  }
+  return { art };
+})();
+
+// Paint the reader hero banner from the open doc's id (shares the card's look).
+function paintHero() {
+  const el = $('#hero');
+  if (!el || !CUR_ID) return;
+  el.style.backgroundImage = `url("${Placeholder.art(CUR_ID, 1200, 320)}")`;
+  el.classList.remove('hidden');
+}
 
 // Runs a slow server task via the job API: POST starts it and returns a job id
 // instantly, then we poll /api/job/{id} until it's done. This keeps every request
@@ -707,6 +814,7 @@ function cardHtml(a) {
   const meta = [a.domain, date, a.est_minutes ? `~${a.est_minutes} min` : '', read]
     .filter(Boolean).join(' · ');
   return `<div class="card" data-id="${a.id}">
+    <div class="card-thumb" style="background-image:url('${Placeholder.art(a.id, 76, 76)}')"></div>
     <div class="card-main">
       <div class="card-title">${escapeHtml(a.title || a.url)}</div>
       <div class="card-meta">${escapeHtml(meta)}</div>
@@ -780,6 +888,8 @@ $('#back').onclick = () => {
   playing = -1;
   $('#player').classList.remove('on');
   $('#compass').classList.remove('show');
+  $('#hero').classList.add('hidden');   // don't flash a stale banner on reopen
+  $('#title').classList.add('hidden');
   MoodMusic.stop();
   MediaControls.clear();
   clearActive();
@@ -962,6 +1072,7 @@ async function openArticle(item, seekChar) {
     HIGHLIGHTS = hls || [];
     $('#title').textContent = item.title || data.title;
     $('#title').classList.remove('hidden');
+    paintHero();
     $('#status').textContent = '';
     renderArticle();
     $('#player').classList.add('on');
@@ -1356,6 +1467,7 @@ async function openChapter(chapter, chapters, idx, seekChar) {
     HIGHLIGHTS = hls || [];
     $('#title').textContent = chapter.title || data.title || 'Chapter';
     $('#title').classList.remove('hidden');
+    paintHero();
     $('#status').textContent = '';
     renderArticle();
     $('#player').classList.add('on');
@@ -1430,8 +1542,10 @@ const MediaControls = {
         title: CUR_TITLE,
         artist: 'Tolkien',
         album,
-        artwork: [
-          { src: '/static/tolkien-icon-192.png', sizes: '192x192', type: 'image/png' },
+        artwork: CUR_ID ? [
+          { src: Placeholder.art(CUR_ID, 512, 512), sizes: '512x512', type: 'image/png' },
+          { src: Placeholder.art(CUR_ID, 256, 256), sizes: '256x256', type: 'image/png' },
+        ] : [
           { src: '/static/tolkien-icon-512.png', sizes: '512x512', type: 'image/png' },
         ],
       });
