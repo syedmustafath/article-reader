@@ -74,6 +74,22 @@
            font-weight: 800; line-height: 1.22; margin: 0 0 22px; letter-spacing: -.01em; }
   #article { font-family: Georgia, 'Times New Roman', serif; font-size: 20px; line-height: 1.78; }
   #article p { margin: 0 0 1.15em; }
+  /* Rich reading structure */
+  #article .a-h2 { font-size: 25px; line-height: 1.25; font-weight: 700; margin: 1.5em 0 .5em; letter-spacing: -.01em; }
+  #article .a-h3 { font-size: 21px; line-height: 1.3; font-weight: 700; margin: 1.35em 0 .45em; }
+  #article .a-bq { margin: 1.2em 0; padding: .1em 0 .1em 1.1em; border-left: 3px solid var(--accent); color: var(--muted); font-style: italic; }
+  #article .a-pre { font-family: ui-monospace, Menlo, monospace; font-size: 15px; line-height: 1.6; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; white-space: pre-wrap; }
+  #article .a-list { margin: 0 0 1.15em; padding-left: 1.4em; }
+  #article ul.a-list { list-style: disc; }
+  #article ol.a-list { list-style: decimal; }
+  #article .a-li { margin: 0 0 .4em; display: list-item; }
+  #article .a-fig { margin: 1.6em 0; text-align: center; }
+  #article .a-fig img { max-width: 100%; height: auto; border-radius: 12px; display: block; margin: 0 auto; }
+  #article .a-fig figcaption { font-family: -apple-system, system-ui, sans-serif; font-size: 13.5px; color: var(--muted); margin-top: .55em; }
+  #article .i-b { font-weight: 700; }
+  #article .i-i { font-style: italic; }
+  #article .i-code { font-family: ui-monospace, Menlo, monospace; font-size: .9em; background: var(--panel); padding: .05em .3em; border-radius: 4px; }
+  #article .i-a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
   .w { border-radius: 5px; cursor: pointer; transition: background .08s; }
   .w.active, .w.flash { background: var(--hl); color: var(--hl-ink);
               box-shadow: 0 0 0 3px var(--hl); }
@@ -488,6 +504,11 @@ let musicVol = (parseInt(localStorage.getItem('nvr_musicvol')) || 40) / 100;
 let PARA_RANGES = [];     // paragraph char ranges of the open doc
 let PARA_MOODS = [];      // mood label per paragraph (from /api/moods)
 let lastParaIdx = -1;     // last paragraph whose mood we applied to the music
+let BLOCKS = [];          // rich structure: [{t,s,e,list?} | {t:'img',src,alt,caption}]
+let INLINES = [];         // inline styling: [{s,e,k,href?}] (k: b|i|code|a)
+let IMAGES = [];          // images in the open doc (for cover/first-image)
+let COVER = null;         // real cover/lead image URL for the open doc
+let CUR_BOOK_COVER = null; // cover of the currently open book (for its chapters)
 const WPM_1X = 180;       // measured pace of the default voice (Andrew) at 1x
 const SPEEDS = [1.0, 1.1, 1.2, 1.25, 1.35, 1.5];  // finer steps, capped at 1.5x
 // default 1.25x, but remember the user's last-used speed across sessions
@@ -498,22 +519,22 @@ const escapeHtml = s => String(s).replace(/[&<>"']/g, c =>
 const plain = s => escapeHtml(s).replace(/\n{2,}/g, '</p><p>').replace(/\n/g, ' ');
 
 // --- Generative placeholders ---
-// A deterministic muted/editorial gradient + film-grain image per document,
-// seeded by its id — so a list card, the reader hero, and the lock-screen
-// artwork all share one identity. Drawn on canvas, memoized by seed@size.
+// A deterministic muted/editorial contour-line image per document, seeded by its
+// id — used as the fallback cover (card + reader hero + lock-screen artwork) when
+// a document has no real image. Drawn on canvas, memoized by seed@size.
 const Placeholder = (() => {
-  // Curated muted / editorial palettes (desaturated, mid-dark) {a,b,accent}.
+  // Curated muted / editorial grounds {a: ground, line: line-color}.
   const PALETTES = [
-    { a: '#3b4252', b: '#5e6b7e', accent: '#97a3b4' }, // slate
-    { a: '#463a4f', b: '#6d5a72', accent: '#a48fa8' }, // plum
-    { a: '#37423a', b: '#566b57', accent: '#8aa088' }, // moss
-    { a: '#4e3f38', b: '#7a5f50', accent: '#b1917c' }, // clay
-    { a: '#2f3a4a', b: '#4d5e73', accent: '#8598ac' }, // dusk-blue
-    { a: '#4a3b3f', b: '#74595f', accent: '#ab8990' }, // ash-rose
-    { a: '#2f4442', b: '#4f6b64', accent: '#86a39b' }, // teal-slate
-    { a: '#393b52', b: '#575a78', accent: '#9195b4' }, // indigo-ash
-    { a: '#46402f', b: '#6e6144', accent: '#a89774' }, // ochre
-    { a: '#383e44', b: '#5a636b', accent: '#93a0a8' }, // storm
+    { a: '#2b2f3a', line: '#9aa6bd' }, // slate
+    { a: '#312a38', line: '#b49cc0' }, // plum
+    { a: '#2a322f', line: '#93b09e' }, // moss
+    { a: '#38302a', line: '#c8a684' }, // clay
+    { a: '#2a2f3d', line: '#8ea0c4' }, // dusk-blue
+    { a: '#332b2c', line: '#c096a0' }, // ash-rose
+    { a: '#2f4442', line: '#86a39b' }, // teal-slate
+    { a: '#393b52', line: '#9195b4' }, // indigo-ash
+    { a: '#46402f', line: '#a89774' }, // ochre
+    { a: '#383e44', line: '#93a0a8' }, // storm
   ];
   function hashStr(s) {                       // xmur3-style string -> uint32
     s = String(s);
@@ -559,31 +580,31 @@ const Placeholder = (() => {
     const c = document.createElement('canvas');
     c.width = w; c.height = h;
     const ctx = c.getContext('2d');
-    const cx = w / 2, cy = h / 2, R = Math.max(w, h);
-    // diagonal gradient at a seed-derived angle
-    const ang = rnd() * Math.PI * 2;
-    const g = ctx.createLinearGradient(
-      cx - Math.cos(ang) * R, cy - Math.sin(ang) * R,
-      cx + Math.cos(ang) * R, cy + Math.sin(ang) * R);
-    g.addColorStop(0, pal.a); g.addColorStop(1, pal.b);
-    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
-    // soft radial highlight for depth (mesh-ish)
-    const hx = w * (0.2 + rnd() * 0.6), hy = h * (0.15 + rnd() * 0.5);
-    const rg = ctx.createRadialGradient(hx, hy, 0, hx, hy, R * 0.85);
-    rg.addColorStop(0, pal.accent); rg.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.globalAlpha = 0.35; ctx.fillStyle = rg; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = pal.a; ctx.fillRect(0, 0, w, h);
+    // generative topographic contour lines, seeded
+    ctx.strokeStyle = pal.line;
+    ctx.lineWidth = Math.max(1, Math.round(Math.min(w, h) / 150));
+    const L = Math.max(14, Math.round(h / 9)), step = Math.max(3, w / 130);
+    for (let i = 0; i < L; i++) {
+      ctx.globalAlpha = 0.14 + 0.5 * (i / L);
+      ctx.beginPath();
+      const base = h * 0.05 + i * (h * 0.92 / L);
+      const amp = (4 + rnd() * 14) * (h / 220), ph = rnd() * 6.283, fr = 1 + rnd() * 2.4;
+      const wob = Math.sin(0.4 + i * 0.42);
+      for (let x = 0; x <= w; x += step) {
+        const y = base + Math.sin(x / w * Math.PI * fr + ph) * amp * wob;
+        x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
     ctx.globalAlpha = 1;
-    // film grain
+    // faint grain for texture
     const tile = grainTile();
     ctx.globalCompositeOperation = 'overlay';
-    ctx.globalAlpha = 0.16;
+    ctx.globalAlpha = 0.05;
     for (let y = 0; y < h; y += tile.height)
       for (let x = 0; x < w; x += tile.width) ctx.drawImage(tile, x, y);
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
-    // vignette
-    const vg = ctx.createRadialGradient(cx, cy, Math.min(w, h) * 0.3, cx, cy, R * 0.75);
-    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.28)');
-    ctx.fillStyle = vg; ctx.fillRect(0, 0, w, h);
     const url = c.toDataURL('image/png');
     cache.set(key, url);
     return url;
@@ -591,11 +612,17 @@ const Placeholder = (() => {
   return { art };
 })();
 
+// The cover for a card/hero/lock screen: the doc's real image if it has one,
+// else the generated contour placeholder seeded by its id.
+function coverFor(id, cover, w, h) {
+  return cover ? cover : Placeholder.art(id, w, h);
+}
+
 // Paint the reader hero banner from the open doc's id (shares the card's look).
 function paintHero() {
   const el = $('#hero');
   if (!el || !CUR_ID) return;
-  el.style.backgroundImage = `url("${Placeholder.art(CUR_ID, 1200, 320)}")`;
+  el.style.backgroundImage = `url("${coverFor(CUR_ID, COVER, 1200, 320)}")`;
   el.classList.remove('hidden');
 }
 
@@ -865,7 +892,7 @@ function cardHtml(a) {
   const meta = [a.domain, date, a.est_minutes ? `~${a.est_minutes} min` : '', read]
     .filter(Boolean).join(' · ');
   return `<div class="card" data-id="${a.id}">
-    <div class="card-thumb" style="background-image:url('${Placeholder.art(a.id, 76, 76)}')"></div>
+    <div class="card-thumb" style="background-image:url('${coverFor(a.id, a.cover, 76, 76)}')"></div>
     <div class="card-main">
       <div class="card-title">${escapeHtml(a.title || a.url)}</div>
       <div class="card-meta">${escapeHtml(meta)}</div>
@@ -959,6 +986,38 @@ function hlIdAt(pos) {
   for (const h of HIGHLIGHTS) if (pos >= h.start && pos < h.end) return h.id;
   return null;
 }
+// Text now derives from rich HTML, so stored offsets may drift; re-anchor each
+// highlight to its saved quote (fall back to stored offsets if not found).
+function reanchorHighlights() {
+  if (!TEXT) return;
+  for (const h of HIGHLIGHTS) {
+    if (!h.quote || TEXT.slice(h.start, h.end) === h.quote) continue;
+    const i = TEXT.indexOf(h.quote);
+    if (i >= 0) { h.start = i; h.end = i + h.quote.length; }
+  }
+}
+const _INLINE_CLS = { b: 'i-b', i: 'i-i', code: 'i-code', a: 'i-a' };
+function inlineAt(pos) {                       // inline styling active at a char offset
+  let cls = '', href = null;
+  for (const it of INLINES) {
+    if (pos >= it.s && pos < it.e) {
+      cls += ' ' + (_INLINE_CLS[it.k] || '');
+      if (it.k === 'a' && it.href && !href) href = it.href;
+    }
+  }
+  return { cls, href };
+}
+function figureHtml(b) {
+  const cap = b.caption ? `<figcaption>${escapeHtml(b.caption)}</figcaption>` : '';
+  return `<figure class="a-fig"><img loading="lazy" src="${escapeHtml(b.src)}" alt="${escapeHtml(b.alt || '')}">${cap}</figure>`;
+}
+// Blocks fallback for pasted/legacy docs with no structure: split TEXT on blank lines.
+function synthBlocks() {
+  const out = []; let last = 0, m; const re = /\n{2,}/g;
+  while ((m = re.exec(TEXT))) { if (m.index > last) out.push({ t: 'p', s: last, e: m.index }); last = m.index + m[0].length; }
+  if (last < TEXT.length) out.push({ t: 'p', s: last, e: TEXT.length });
+  return out;
+}
 function renderArticle() {
   const marks = [];
   CHUNKS.forEach(c => (c.marks || []).forEach(m => marks.push(m)));
@@ -966,34 +1025,48 @@ function renderArticle() {
   marks.forEach((m, i) => m._span = i);
   window._allMarks = marks;
 
-  let html = '<p>';
-  const spanFor = (s, e, extraCls, dataI) => {
+  const leaf = (s, e, extraCls, dataI) => {   // one data-s span (word or gap), rich-styled
     const hid = hlIdAt(s);
-    const cls = extraCls + (hid ? ' hl' : '') + (hid && hlNote(hid) ? ' has-note' : '');
+    const inl = inlineAt(s);
+    const cls = extraCls + inl.cls + (hid ? ' hl' : '') + (hid && hlNote(hid) ? ' has-note' : '');
     const di = dataI != null ? ` data-i="${dataI}"` : '';
     const dh = hid ? ` data-hl="${hid}"` : '';
-    return `<span class="${cls}" data-s="${s}"${di}${dh}>${escapeHtml(TEXT.slice(s, e))}</span>`;
+    const ha = inl.href ? ` data-href="${escapeHtml(inl.href)}"` : '';
+    return `<span class="${cls}" data-s="${s}"${di}${dh}${ha}>${escapeHtml(TEXT.slice(s, e)).replace(/\n/g, ' ')}</span>`;
   };
-  const emitGap = (s, e) => {                 // plain text between words; handle paragraphs
-    let idx = s;
-    for (const part of TEXT.slice(s, e).split(/(\n{2,})/)) {
-      if (!part) continue;
-      if (/^\n{2,}$/.test(part)) { html += '</p><p>'; idx += part.length; continue; }
-      const hid = hlIdAt(idx);
-      const cls = 'g' + (hid ? ' hl' : '') + (hid && hlNote(hid) ? ' has-note' : '');
-      const dh = hid ? ` data-hl="${hid}"` : '';
-      html += `<span class="${cls}" data-s="${idx}"${dh}>${escapeHtml(part).replace(/\n/g, ' ')}</span>`;
-      idx += part.length;
+  let mi = 0;
+  const renderRange = (rs, re) => {            // emit word/gap spans covering [rs,re)
+    let out = '', cur = rs;
+    while (mi < marks.length && marks[mi].start < rs) mi++;
+    while (mi < marks.length && marks[mi].start < re) {
+      const m = marks[mi];
+      if (m.start > cur) out += leaf(cur, m.start, 'g');
+      out += leaf(m.start, Math.min(m.end, re), 'w', m._span);
+      cur = m.end; mi++;
     }
+    if (cur < re) out += leaf(cur, re, 'g');
+    return out;
   };
-  let cur = 0;
-  marks.forEach((m, i) => {
-    if (m.start > cur) emitGap(cur, m.start);
-    html += spanFor(m.start, m.end, 'w', i);
-    cur = m.end;
-  });
-  if (cur < TEXT.length) emitGap(cur, TEXT.length);
-  $('#article').innerHTML = html + '</p>';
+
+  const blocks = BLOCKS.length ? BLOCKS : synthBlocks();
+  let html = '', listOpen = null;
+  const closeList = () => { if (listOpen) { html += `</${listOpen}>`; listOpen = null; } };
+  for (const b of blocks) {
+    if (b.t === 'img') { closeList(); html += figureHtml(b); continue; }
+    if (b.t === 'li') {
+      const kind = b.list === 'ol' ? 'ol' : 'ul';
+      if (listOpen && listOpen !== kind) closeList();
+      if (!listOpen) { html += `<${kind} class="a-list">`; listOpen = kind; }
+      html += `<li class="a-li">${renderRange(b.s, b.e)}</li>`;
+      continue;
+    }
+    closeList();
+    const el = (b.t === 'h2' || b.t === 'h3') ? b.t : (b.t === 'blockquote' ? 'blockquote' : (b.t === 'pre' ? 'pre' : 'p'));
+    const cls = { h2: 'a-h2', h3: 'a-h3', blockquote: 'a-bq', pre: 'a-pre' }[b.t] || 'a-p';
+    html += `<${el} class="${cls}">${renderRange(b.s, b.e)}</${el}>`;
+  }
+  closeList();
+  $('#article').innerHTML = html || '<p class="a-p"></p>';
   spans = Array.from(document.querySelectorAll('.w'));
 }
 function hlNote(id) { const h = HIGHLIGHTS.find(x => String(x.id) === String(id)); return h && h.note; }
@@ -1117,10 +1190,12 @@ async function openArticle(item, seekChar) {
       apiJSON('GET', '/api/highlights?article_id=' + encodeURIComponent(item.id)).catch(() => [])
     ]);
     TEXT = data.text;
+    BLOCKS = data.blocks || []; INLINES = data.inlines || []; IMAGES = data.images || [];
+    COVER = data.cover || null;
     totalWords = (TEXT.match(/\S+/g) || []).length;
     buildParagraphs(); classifyMoods();   // paragraph moods for background music
     CHUNKS = data.chunks.map(c => ({ ...c, marks: null, audioUrl: null }));
-    HIGHLIGHTS = hls || [];
+    HIGHLIGHTS = hls || []; reanchorHighlights();
     $('#title').textContent = item.title || data.title;
     $('#title').classList.remove('hidden');
     paintHero();
@@ -1415,6 +1490,7 @@ function renderBooks(books) {
   $('#bookStatus').textContent = '';
   $('#bookList').innerHTML = books.map(b => `
     <div class="card" data-id="${escapeHtml(b.id)}">
+      <div class="card-thumb" style="background-image:url('${coverFor(b.id, b.cover, 76, 76)}')"></div>
       <div class="card-main">
         <div class="card-title">${escapeHtml(b.title || 'Untitled')}</div>
         <div class="card-meta">${[escapeHtml(b.author || ''), (b.chapter_count || 0) + ' chapters']
@@ -1468,6 +1544,7 @@ async function openBook(book) {
   showView('chapters');
   window.scrollTo(0, 0);
   $('#chBookTitle').textContent = book.title || 'Book';
+  CUR_BOOK_COVER = book.cover || null;
   $('#chList').innerHTML = '';
   $('#chStatus').className = '';
   $('#chStatus').textContent = 'Loading…';
@@ -1512,10 +1589,12 @@ async function openChapter(chapter, chapters, idx, seekChar) {
       apiJSON('GET', '/api/highlights?chapter_id=' + encodeURIComponent(chapter.id)).catch(() => [])
     ]);
     TEXT = data.text;
+    BLOCKS = data.blocks || []; INLINES = data.inlines || []; IMAGES = data.images || [];
+    COVER = CUR_BOOK_COVER || null;
     totalWords = (TEXT.match(/\S+/g) || []).length;
     buildParagraphs(); classifyMoods();   // paragraph moods for background music
     CHUNKS = data.chunks.map(c => ({ ...c, marks: null, audioUrl: null }));
-    HIGHLIGHTS = hls || [];
+    HIGHLIGHTS = hls || []; reanchorHighlights();
     $('#title').textContent = chapter.title || data.title || 'Chapter';
     $('#title').classList.remove('hidden');
     paintHero();
@@ -1593,7 +1672,9 @@ const MediaControls = {
         title: CUR_TITLE,
         artist: 'Tolkien',
         album,
-        artwork: CUR_ID ? [
+        artwork: COVER ? [
+          { src: COVER, sizes: '512x512' },
+        ] : CUR_ID ? [
           { src: Placeholder.art(CUR_ID, 512, 512), sizes: '512x512', type: 'image/png' },
           { src: Placeholder.art(CUR_ID, 256, 256), sizes: '256x256', type: 'image/png' },
         ] : [

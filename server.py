@@ -9,9 +9,11 @@ to character ranges so the frontend can highlight words in sync with the audio.
 """
 
 import asyncio
+import base64
 import hashlib
 import json
 import os
+import posixpath
 import re
 import tempfile
 import time
@@ -25,7 +27,7 @@ import ebooklib
 import edge_tts
 import httpx
 import trafilatura
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
 from ebooklib import epub
 from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
@@ -106,37 +108,242 @@ class MoodsRequest(BaseModel):
     paragraphs: list[str]
 
 
-def extract_article(url: str) -> tuple[str, str]:
-    """Fetch a URL and return (title, clean_text)."""
+# --- Rich reading model ---
+# Articles and EPUB chapters are parsed from HTML into a structured model that
+# preserves formatting + images WITHOUT disturbing the plain-text offset stream
+# the TTS/highlight engine depends on. `text` is the flat speakable string (blocks
+# joined by "\n\n"); `blocks`/`inlines`/`images` carry character offsets into it.
+# This one allowlist walk is also the sanitizer: only known-safe tags/attrs are
+# emitted; scripts, event handlers, and unsafe urls never survive.
+_HEADING_MAP = {"h1": "h2", "h2": "h2", "h3": "h3", "h4": "h3", "h5": "h3", "h6": "h3"}
+_INLINE_MAP = {"b": "b", "strong": "b", "i": "i", "em": "i", "code": "code", "a": "a"}
+_TEXT_BLOCKS = {"p", "blockquote", "pre", "h1", "h2", "h3", "h4", "h5", "h6"}
+_WS_RE = re.compile(r"\s+")
+
+
+def _ws(s: str) -> str:
+    return _WS_RE.sub(" ", s)
+
+
+def _safe_href(href: Optional[str]) -> Optional[str]:
+    href = (href or "").strip()
+    return href if re.match(r"^(https?:|mailto:)", href, re.I) else None
+
+
+def _safe_src(src: Optional[str]) -> Optional[str]:
+    src = (src or "").strip()
+    return src if re.match(r"^(https:|data:image/)", src, re.I) else None
+
+
+def html_to_model(html) -> dict:
+    """Parse HTML into {text, blocks, inlines, images} with offsets into `text`."""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "noscript", "head", "nav", "form"]):
+        tag.decompose()
+    root = soup.body or soup
+
+    parts: list[str] = []
+    blocks: list[dict] = []
+    inlines: list[dict] = []
+    images: list[dict] = []
+    pending: list[dict] = []
+    pos = 0
+
+    def emit(s: str):
+        nonlocal pos
+        if not s:
+            return
+        if parts and parts[-1].endswith(" ") and s.startswith(" "):
+            s = s.lstrip(" ")
+            if not s:
+                return
+        parts.append(s)
+        pos += len(s)
+
+    def sep():
+        nonlocal pos
+        if parts and not parts[-1].endswith("\n\n"):
+            parts.append("\n\n")
+            pos += 2
+
+    def add_image(node):
+        src = _safe_src(node.get("src"))
+        if src:
+            pending.append({"t": "img", "src": src, "alt": (node.get("alt") or "").strip()})
+
+    def flush_images():
+        for im in pending:
+            blocks.append(im)
+            images.append(im)
+        pending.clear()
+
+    def walk_inline(node):
+        nonlocal pos
+        for child in node.children:
+            if isinstance(child, NavigableString):
+                emit(_ws(str(child)))
+            elif child.name == "img":
+                add_image(child)
+            elif child.name == "br":
+                emit(" ")
+            elif child.name in _INLINE_MAP:
+                k = _INLINE_MAP[child.name]
+                s = pos
+                href = _safe_href(child.get("href")) if k == "a" else None
+                walk_inline(child)
+                if pos > s:
+                    rng = {"s": s, "e": pos, "k": k}
+                    if href:
+                        rng["href"] = href
+                    inlines.append(rng)
+            else:
+                walk_inline(child)
+
+    def text_block(node, tag, list_kind=None):
+        nonlocal pos
+        s = pos
+        walk_inline(node)
+        if pos > s:
+            b = {"t": tag, "s": s, "e": pos}
+            if list_kind:
+                b["list"] = list_kind
+            blocks.append(b)
+            sep()
+        flush_images()
+
+    def walk(node, list_kind=None):
+        nonlocal pos
+        for child in node.children:
+            if isinstance(child, NavigableString):
+                txt = _ws(str(child))
+                if txt.strip():
+                    s = pos
+                    emit(txt)
+                    if pos > s:
+                        blocks.append({"t": "p", "s": s, "e": pos})
+                        sep()
+                continue
+            name = child.name
+            if name == "img":
+                add_image(child)
+                flush_images()
+            elif name == "figure":
+                img = child.find("img")
+                if img and _safe_src(img.get("src")):
+                    im = {"t": "img", "src": _safe_src(img.get("src")),
+                          "alt": (img.get("alt") or "").strip()}
+                    cap = child.find("figcaption")
+                    if cap:
+                        im["caption"] = cap.get_text(" ", strip=True)
+                    blocks.append(im)
+                    images.append(im)
+            elif name in ("ul", "ol"):
+                walk(child, "ol" if name == "ol" else "ul")
+            elif name == "li":
+                text_block(child, "li", list_kind or "ul")
+            elif name in _TEXT_BLOCKS:
+                text_block(child, _HEADING_MAP.get(name, name))
+            else:
+                walk(child, list_kind)
+
+    walk(root)
+    text = "".join(parts).rstrip("\n")
+    return {"text": text, "blocks": blocks, "inlines": inlines, "images": images}
+
+
+def plain_to_model(text: str) -> dict:
+    """Model for pasted plain text: paragraphs split on blank lines."""
+    text = (text or "").strip()
+    blocks, pos = [], 0
+    joined = []
+    for para in re.split(r"\n{2,}", text):
+        para = para.strip()
+        if not para:
+            continue
+        s = pos
+        joined.append(para)
+        pos += len(para)
+        blocks.append({"t": "p", "s": s, "e": pos})
+        joined.append("\n\n")
+        pos += 2
+    return {"text": "".join(joined).rstrip("\n"), "blocks": blocks, "inlines": [], "images": []}
+
+
+def extract_article(url: str) -> tuple[str, str, Optional[str]]:
+    """Fetch a URL and return (title, rich_html, cover_image_url)."""
     downloaded = trafilatura.fetch_url(url)
     if not downloaded:
         raise HTTPException(400, f"Could not fetch the page at {url}")
-    text = trafilatura.extract(downloaded, include_comments=False, include_tables=False)
-    if not text or not text.strip():
+    html = trafilatura.extract(
+        downloaded, output_format="html", include_images=True, include_links=True,
+        include_formatting=True, include_comments=False, include_tables=False)
+    if not html or not html.strip():
         raise HTTPException(422, "Could not extract readable article text from that page.")
     title = url
+    cover = None
     meta = trafilatura.extract_metadata(downloaded)
-    if meta and meta.title:
-        title = meta.title
-    return title, text.strip()
+    if meta:
+        if meta.title:
+            title = meta.title
+        cover = _safe_src(getattr(meta, "image", None))
+    return title, html, cover
 
 
-def _chapter_text(html: bytes) -> tuple[Optional[str], str]:
-    """Extract (heading, paragraph_text) from one EPUB document's HTML."""
-    soup = BeautifulSoup(html, "html.parser")
+def _epub_image_map(book) -> dict:
+    """Map EPUB image hrefs (full path + basename) to data-URIs."""
+    out = {}
+    for item in book.get_items_of_type(ebooklib.ITEM_IMAGE):
+        try:
+            b64 = base64.b64encode(item.get_content()).decode("ascii")
+        except Exception:
+            continue
+        uri = f"data:{item.media_type};base64,{b64}"
+        name = item.file_name
+        out[name] = uri
+        out[posixpath.basename(name)] = uri
+    return out
+
+
+def _epub_cover(book, img_map: dict) -> Optional[str]:
+    for getter in (lambda: book.get_item_with_id("cover-image"),
+                   lambda: book.get_item_with_id("cover")):
+        try:
+            it = getter()
+            if it and it.get_type() == ebooklib.ITEM_IMAGE:
+                return img_map.get(it.file_name) or img_map.get(posixpath.basename(it.file_name))
+        except Exception:
+            pass
+    for name, uri in img_map.items():
+        if "cover" in name.lower():
+            return uri
+    return None
+
+
+def _chapter_html(raw: bytes, chapter_path: str, img_map: dict) -> tuple[Optional[str], str, int]:
+    """Clean one chapter's XHTML: inline images as data-URIs, return
+    (heading, html_str, plain_len)."""
+    soup = BeautifulSoup(raw, "html.parser")
     for tag in soup(["script", "style"]):
         tag.decompose()
+    base = posixpath.dirname(chapter_path)
+    for img in soup.find_all("img"):
+        src = (img.get("src") or "").strip()
+        if not src:
+            continue
+        resolved = posixpath.normpath(posixpath.join(base, src)) if not src.startswith("data:") else src
+        uri = img_map.get(resolved) or img_map.get(posixpath.basename(src)) or (src if src.startswith("data:") else None)
+        if uri:
+            img["src"] = uri
+        else:
+            img.decompose()
     heading = soup.find(["h1", "h2", "h3"])
     title = heading.get_text(" ", strip=True) if heading else None
-    blocks = [b.get_text(" ", strip=True)
-              for b in soup.find_all(["p", "h1", "h2", "h3", "h4", "li", "blockquote"])]
-    blocks = [b for b in blocks if b]
-    text = "\n\n".join(blocks) if blocks else soup.get_text("\n", strip=True)
-    return title, text.strip()
+    body = soup.body or soup
+    return title, str(body), len(body.get_text(" ", strip=True))
 
 
-def parse_epub(data: bytes) -> tuple[str, str, list[dict]]:
-    """Parse EPUB bytes into (title, author, chapters=[{idx,title,text}]).
+def parse_epub(data: bytes) -> tuple[str, str, Optional[str], list[dict]]:
+    """Parse EPUB bytes into (title, author, cover, chapters=[{idx,title,html}]).
     Chapters follow the spine (reading order); tiny front-matter is skipped."""
     with tempfile.NamedTemporaryFile(suffix=".epub", delete=True) as tmp:
         tmp.write(data)
@@ -149,23 +356,25 @@ def parse_epub(data: bytes) -> tuple[str, str, list[dict]]:
 
     title = meta("title") or "Untitled book"
     author = meta("creator") or ""
+    img_map = _epub_image_map(book)
+    cover = _epub_cover(book, img_map)
 
     chapters: list[dict] = []
     for idref, _ in book.spine:
         item = book.get_item_with_id(idref)
         if not item or item.get_type() != ebooklib.ITEM_DOCUMENT:
             continue
-        heading, text = _chapter_text(item.get_content())
-        if len(text) < 200:          # skip cover / nav / tiny sections
+        heading, html, plain_len = _chapter_html(item.get_content(), item.file_name, img_map)
+        if plain_len < 200:          # skip cover / nav / tiny sections
             continue
         chapters.append({
             "idx": len(chapters),
             "title": heading or f"Chapter {len(chapters) + 1}",
-            "text": text,
+            "html": html,
         })
     if not chapters:
         raise HTTPException(422, "Could not extract any readable chapters from that EPUB.")
-    return title, author, chapters
+    return title, author, cover, chapters
 
 
 async def classify_moods(paragraphs: list[str]) -> list[str]:
@@ -388,10 +597,13 @@ async def extract(req: ExtractRequest, user: dict = Depends(current_user)):
 
     async def work():
         if req.url:
-            title, text = await asyncio.to_thread(extract_article, req.url.strip())
+            title, html, cover = await asyncio.to_thread(extract_article, req.url.strip())
+            model = html_to_model(html)
         else:
-            title, text = "Pasted text", req.text.strip()
-        return {"title": title, "text": text, "chunks": make_chunks(text)}
+            title, cover, model = "Pasted text", None, plain_to_model(req.text.strip())
+        text = model["text"]
+        return {"title": title, "cover": cover, "text": text, "chunks": make_chunks(text),
+                "blocks": model["blocks"], "inlines": model["inlines"], "images": model["images"]}
 
     return {"job": start_job(work, user["id"])}
 
@@ -449,12 +661,14 @@ async def add_article(req: ArticleRequest, user: dict = Depends(current_user)):
         raise HTTPException(400, "Provide a url.")
 
     async def work():
-        title, text = await asyncio.to_thread(extract_article, url)
+        title, html, cover = await asyncio.to_thread(extract_article, url)
+        text = html_to_model(html)["text"]
         row = {
             "user_id": user["id"],
             "url": url,
             "title": title,
             "domain": urlparse(url).hostname or "",
+            "cover": cover,
             # ~180 wpm (measured for Andrew) at 1x => 225 wpm at the default 1.25x.
             "est_minutes": max(1, round(len(text.split()) / 225)),
         }
@@ -487,16 +701,16 @@ async def add_book(file: UploadFile, user: dict = Depends(current_user)):
     uid = user["id"]
 
     async def work():
-        title, author, chapters = await asyncio.to_thread(parse_epub, data)
+        title, author, cover, chapters = await asyncio.to_thread(parse_epub, data)
         resp = await _supabase(
             "POST", "/books",
             json={"user_id": uid, "title": title, "author": author,
-                  "chapter_count": len(chapters)},
+                  "cover": cover, "chapter_count": len(chapters)},
             headers={"Prefer": "return=representation"},
         )
         book = resp.json()[0]
         rows = [{"user_id": uid, "book_id": book["id"], "idx": c["idx"],
-                 "title": c["title"], "text": c["text"]} for c in chapters]
+                 "title": c["title"], "html": c["html"]} for c in chapters]
         # insert chapters in batches to keep each request small
         for i in range(0, len(rows), 20):
             await _supabase("POST", "/book_chapters", json=rows[i:i + 20])
@@ -519,12 +733,15 @@ async def get_chapter(req: ChapterRequest, user: dict = Depends(current_user)):
 
     async def work():
         resp = await _supabase(
-            "GET", f"/book_chapters?id=eq.{req.chapter_id}&user_id=eq.{uid}&select=title,text")
+            "GET", f"/book_chapters?id=eq.{req.chapter_id}&user_id=eq.{uid}&select=title,html,text")
         rows = resp.json()
         if not rows:
             raise HTTPException(404, "Chapter not found.")
-        text = (rows[0].get("text") or "").strip()
-        return {"title": rows[0].get("title") or "", "text": text, "chunks": make_chunks(text)}
+        row = rows[0]
+        model = html_to_model(row["html"]) if row.get("html") else plain_to_model(row.get("text") or "")
+        text = model["text"]
+        return {"title": row.get("title") or "", "text": text, "chunks": make_chunks(text),
+                "blocks": model["blocks"], "inlines": model["inlines"], "images": model["images"]}
 
     return {"job": start_job(work, uid)}
 

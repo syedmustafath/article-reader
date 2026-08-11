@@ -32,6 +32,26 @@ return a clear 503.
 4. Set env vars `SUPABASE_URL` and `SUPABASE_KEY` — in Render (Environment tab)
    and locally (`export SUPABASE_URL=… SUPABASE_KEY=…`) for testing.
 
+## Rich reading (formatting + images)
+
+Articles and EPUB chapters render with real formatting — headings, bold/italic,
+blockquotes, lists, links, and images — like a reading app, while the word-by-word
+narration highlight stays perfectly in sync. Extraction returns a structured model
+(`{text, blocks, inlines, images}`) where `text` is the flat speakable stream the
+TTS/highlight engine indexes into and `blocks`/`inlines`/`images` carry character
+offsets into it; the reader frames that stream with rich elements without disturbing
+any offset. EPUB images are inlined as data-URIs; each article/book also stores its
+lead image / cover, shown on cards, the reader hero, and the lock screen (a generated
+contour-line placeholder is used when there's no image).
+
+Add the columns (Supabase SQL editor):
+
+```sql
+alter table articles      add column cover text;
+alter table books         add column cover text;
+alter table book_chapters add column html  text;
+```
+
 ## Accounts (Google sign-in + per-user libraries)
 
 Users sign in with Google (via Supabase Auth); every article/book/highlight is
