@@ -509,6 +509,7 @@ let INLINES = [];         // inline styling: [{s,e,k,href?}] (k: b|i|code|a)
 let IMAGES = [];          // images in the open doc (for cover/first-image)
 let COVER = null;         // real cover/lead image URL for the open doc
 let CUR_BOOK_COVER = null; // cover of the currently open book (for its chapters)
+let _lastT = 0;           // last-good playback time within the current chunk (recovery)
 const WPM_1X = 180;       // measured pace of the default voice (Andrew) at 1x
 const SPEEDS = [1.0, 1.1, 1.2, 1.25, 1.35, 1.5];  // finer steps, capped at 1.5x
 // default 1.25x, but remember the user's last-used speed across sessions
@@ -1113,6 +1114,7 @@ function updateNote(msg) {
 async function playFrom(i, seekTime = 0) {
   if (i < 0 || i >= CHUNKS.length) return;
   const mine = genId;
+  _wantPlay = true;
   playing = i;
   updateNote('Loading audio…');
   prefetch(i);
@@ -1270,6 +1272,7 @@ audio.addEventListener('timeupdate', () => {
     updateTimeDisplay(frac);
   }
   MediaControls.position();               // feed the lock-screen scrubber
+  if (audio.currentTime > 0) _lastT = audio.currentTime;   // last-good pos for recovery
   if (Date.now() - lastSave > 4000) { lastSave = Date.now(); saveProgress(); }
 });
 
@@ -1715,14 +1718,54 @@ const ICON_PAUSE = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="
 $('#play').innerHTML = ICON_PLAY;
 // Shared play/pause + skip bodies so the in-app buttons, keyboard Space, and the
 // lock-screen / AirPods controls all go through one path (MoodMusic never desyncs).
-function doPlay() { audio.play(); }
-function doPause() { audio.pause(); MoodMusic.stop(); }   // explicit pause stops the score
+let _wantPlay = false;    // does the user currently intend playback? (drives recovery)
+let _recovering = false;
+let _recoverTries = 0;    // capped so a truly-down source can't loop forever
+// The audio clips live only in the server's memory (and the free tier sleeps), so a
+// paused-while-locked resume can hit a stale /audio URL that 404s. Rather than fail
+// silently, re-synthesize the current part on demand and resume where we were — this
+// is what makes AirPods / lock-screen play work handsfree.
+async function recoverPlayback() {
+  if (_recovering || playing < 0) return;
+  if (_recoverTries >= 3) { updateNote('Tap ▶ to resume'); return; }  // give up, no loop
+  _recoverTries++;
+  _recovering = true;
+  const mine = genId, i = playing;
+  const t = (isFinite(audio.currentTime) && audio.currentTime > 0) ? audio.currentTime : _lastT;
+  updateNote('Reconnecting…');
+  try {
+    const c = CHUNKS[i];
+    if (c) { c.audioUrl = null; c._promise = null; }   // force a fresh /audio URL
+    const fresh = await ensureChunk(i);
+    if (mine !== genId || playing !== i) return;
+    bindChunk(fresh);
+    audio.src = fresh.audioUrl;
+    audio.playbackRate = RATE;
+    await audio.play();
+    if (t) { try { audio.currentTime = t; } catch (e) {} }
+    updateNote('');
+    MediaControls.setMeta(); MediaControls.position();
+  } catch (e) {
+    updateNote('Tap ▶ to resume');
+  } finally {
+    _recovering = false;
+  }
+}
+async function doPlay() {
+  _wantPlay = true;
+  _recoverTries = 0;        // each explicit play intent gets a fresh set of retries
+  try { await audio.play(); }
+  catch (e) { await recoverPlayback(); }   // stale source / blocked -> self-heal
+}
+function doPause() { _wantPlay = false; audio.pause(); MoodMusic.stop(); }   // explicit pause stops the score
 function prevPart() {   // podcast-style: restart the current part if we're >3s in
   if (playing < 0) return;
-  if (audio.currentTime > 3 || playing === 0) { audio.currentTime = 0; audio.play(); }
+  _wantPlay = true;
+  if (audio.currentTime > 3 || playing === 0) { audio.currentTime = 0; doPlay(); }
   else playFrom(playing - 1);
 }
 function nextPart() {
+  _wantPlay = true;
   if (playing >= 0 && playing + 1 < CHUNKS.length) playFrom(playing + 1);
 }
 $('#play').onclick = () => { if (audio.paused) doPlay(); else doPause(); };
@@ -1730,7 +1773,9 @@ audio.addEventListener('play', () => { $('#play').innerHTML = ICON_PAUSE; MediaC
 audio.addEventListener('pause', () => { $('#play').innerHTML = ICON_PLAY; MediaControls.state('paused'); });
 // 'playing' fires each time audio actually resumes (incl. part/chapter changes) —
 // keep the music going across those without dipping.
-audio.addEventListener('playing', () => { if (musicOn) { MoodMusic.start(); updateMood(); } });
+audio.addEventListener('playing', () => { _recoverTries = 0; if (musicOn) { MoodMusic.start(); updateMood(); } });
+// If the source 404s/errors mid-intent (server slept, clip evicted), self-heal.
+audio.addEventListener('error', () => { if (_wantPlay) recoverPlayback(); });
 
 $('#prev').onclick = prevPart;
 $('#next').onclick = nextPart;

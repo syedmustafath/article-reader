@@ -49,7 +49,7 @@ MOODS = ["neutral", "calm", "tense", "sad", "hopeful", "mysterious", "epic"]
 # In-memory audio cache: id -> mp3 bytes. Cleared on restart; capped below.
 _AUDIO: dict[str, bytes] = {}
 _AUDIO_ORDER: list[str] = []
-_MAX_CACHED = 200
+_MAX_CACHED = 600   # keep more chunks live so /audio URLs go stale less often
 
 MAX_CHUNK_CHARS = 1600  # ~1-2 paragraphs; keeps prefetch comfortably ahead.
 FIRST_CHUNK_CHARS = 500  # smaller first chunk => faster time-to-first-audio.
