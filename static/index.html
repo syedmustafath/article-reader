@@ -208,6 +208,18 @@
   .ch-num { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 14px;
             min-width: 22px; text-align: right; flex: none; }
   .ch-title { font-size: 17px; line-height: 1.35; overflow-wrap: anywhere; }
+  .ch-item.current .ch-title { color: var(--accent); font-weight: 650; }
+  .ch-search { margin: 0 0 12px; }
+  #chSearch { width: 100%; padding: 11px 14px; font-size: 16px; border: 1px solid var(--line);
+              border-radius: 12px; background: var(--panel); color: inherit; }
+  #chSearch:focus { outline: none; border-color: var(--accent); }
+  .sr-item { padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px;
+             margin-bottom: 8px; cursor: pointer; background: var(--panel); }
+  .sr-item:hover { border-color: var(--accent); }
+  .sr-ch { font-size: 12.5px; color: var(--muted); margin-bottom: 3px; }
+  .sr-snip { font-size: 14.5px; line-height: 1.45; }
+  .sr-snip b { background: var(--uhl); border-radius: 3px; font-weight: 600; }
+  .sr-empty { color: var(--muted); text-align: center; padding: 28px 20px; font-size: 15px; }
   #bookStatus, #chStatus { color: var(--muted); text-align: center; padding: 44px 20px; font-size: 15px; }
   #bookStatus.err, #chStatus.err { color: #d0402a; }
   /* Welcome splash */
@@ -338,6 +350,8 @@
     </div>
   </header>
   <main>
+    <div class="ch-search"><input id="chSearch" type="search" placeholder="Search this book…" autocomplete="off"></div>
+    <div id="chSearchResults"></div>
     <div id="chList"></div>
     <div id="chStatus"></div>
   </main>
@@ -351,6 +365,7 @@
     <div class="bar">
       <button id="back" class="icon" aria-label="Back to list">‹</button>
       <div class="spacer"></div>
+      <button id="contents" class="icon hidden" aria-label="Contents"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg></button>
       <button id="gear" class="icon" aria-label="Settings">⚙</button>
     </div>
   </header>
@@ -509,6 +524,8 @@ let INLINES = [];         // inline styling: [{s,e,k,href?}] (k: b|i|code|a)
 let IMAGES = [];          // images in the open doc (for cover/first-image)
 let COVER = null;         // real cover/lead image URL for the open doc
 let CUR_BOOK_COVER = null; // cover of the currently open book (for its chapters)
+let CUR_BOOK_ID = null;   // id of the currently open book (for search + resume)
+let CUR_BOOK_TITLE = '';  // title of the currently open book
 const WPM_1X = 180;       // measured pace of the default voice (Andrew) at 1x
 const SPEEDS = [1.0, 1.1, 1.2, 1.25, 1.35, 1.5];  // finer steps, capped at 1.5x
 // default 1.25x, but remember the user's last-used speed across sessions
@@ -1176,6 +1193,7 @@ async function openArticle(item, seekChar) {
   CUR_TYPE = 'article';
   CUR_ID = item.id; CUR_URL = item.url; CUR_TITLE = item.title;
   MediaControls.setMeta();   // now-playing card = article title
+  $('#contents').classList.add('hidden');   // articles have no chapter list
   HIGHLIGHTS = [];
   $('#status').className = '';
   $('#status').textContent = 'Extracting article…';
@@ -1545,21 +1563,30 @@ async function openBook(book) {
   window.scrollTo(0, 0);
   $('#chBookTitle').textContent = book.title || 'Book';
   CUR_BOOK_COVER = book.cover || null;
-  $('#chList').innerHTML = '';
+  CUR_BOOK_ID = book.id; CUR_BOOK_TITLE = book.title || 'Book';
+  $('#chSearch').value = ''; $('#chSearchResults').innerHTML = '';
+  $('#chList').style.display = ''; $('#chList').innerHTML = '';
   $('#chStatus').className = '';
   $('#chStatus').textContent = 'Loading…';
   try {
     const chapters = await apiJSON('GET', '/api/books/' + book.id + '/chapters');
     CHAPTERS = chapters;
     renderChapters(chapters);
+    // Kindle-style: jump straight back into the last-read chapter (contents stay behind it)
+    const last = loadBookLast(book.id);
+    if (last && chapters[last.idx] && chapters[last.idx].id === last.id) {
+      CUR_BACK = 'chapters';
+      openChapter(chapters[last.idx], chapters, last.idx);
+    }
   } catch (e) { $('#chStatus').className = 'err'; $('#chStatus').textContent = 'Error: ' + e.message; }
 }
 
 function renderChapters(chapters) {
   if (!chapters.length) { $('#chStatus').textContent = 'No chapters found.'; return; }
   $('#chStatus').textContent = '';
+  const last = loadBookLast(CUR_BOOK_ID);
   $('#chList').innerHTML = chapters.map((c, i) => `
-    <div class="ch-item" data-idx="${i}">
+    <div class="ch-item${last && last.idx === i ? ' current' : ''}" data-idx="${i}">
       <span class="ch-num">${i + 1}</span>
       <span class="ch-title">${escapeHtml(c.title || 'Chapter ' + (i + 1))}</span>
     </div>`).join('');
@@ -1579,6 +1606,8 @@ async function openChapter(chapter, chapters, idx, seekChar) {
   MediaControls.setMeta();   // now-playing card = chapter title / book album
   CHAPTERS = chapters || [];
   CUR_CH_IDX = idx || 0;
+  $('#contents').classList.remove('hidden');   // reader gets a "Contents" button
+  saveBookLast();                               // remember this as the book's last spot
   HIGHLIGHTS = [];
   $('#status').className = ''; $('#status').textContent = 'Loading chapter…';
   $('#title').classList.add('hidden'); $('#article').innerHTML = '';
@@ -1653,6 +1682,52 @@ function loadProgress(id) {
   return isFinite(f) ? f : 0;
 }
 function clearProgress(id) { try { localStorage.removeItem(progKey(id)); } catch (e) {} }
+
+// --- Per-book "last chapter" pointer (so reopening a book resumes it) ---
+// Kept separate from the per-chapter fraction key (which auto-advance clears).
+const bookLastKey = id => 'nvr_book_last_' + (USER ? USER.id + '_' : '') + id;
+function saveBookLast() {
+  if (CUR_TYPE !== 'chapter' || !CUR_BOOK_ID) return;
+  if (!(CHAPTERS[CUR_CH_IDX] && CHAPTERS[CUR_CH_IDX].id === CUR_ID)) return;  // real book context only
+  try { localStorage.setItem(bookLastKey(CUR_BOOK_ID), JSON.stringify({ id: CUR_ID, idx: CUR_CH_IDX })); } catch (e) {}
+}
+function loadBookLast(id) {
+  try { return JSON.parse(localStorage.getItem(bookLastKey(id)) || 'null'); } catch (e) { return null; }
+}
+
+// --- Book search: find a line, jump straight to it ---
+$('#contents').onclick = () => { if (CHAPTERS.length) showView('chapters'); };
+let _searchTimer = null;
+$('#chSearch').addEventListener('input', () => {
+  clearTimeout(_searchTimer);
+  const q = $('#chSearch').value.trim();
+  if (q.length < 2) { $('#chSearchResults').innerHTML = ''; $('#chList').style.display = ''; return; }
+  _searchTimer = setTimeout(() => runBookSearch(q), 250);
+});
+async function runBookSearch(q) {
+  if (!CUR_BOOK_ID) return;
+  $('#chList').style.display = 'none';
+  try {
+    const res = await apiJSON('GET', '/api/books/' + CUR_BOOK_ID + '/search?q=' + encodeURIComponent(q));
+    renderSearchResults(res, q);
+  } catch (e) { $('#chSearchResults').innerHTML = '<div class="sr-empty">Search failed.</div>'; }
+}
+function emphasize(snippet, q) {
+  const eq = escapeHtml(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return escapeHtml(snippet).replace(new RegExp('(' + eq + ')', 'ig'), '<b>$1</b>');
+}
+function renderSearchResults(res, q) {
+  if (!res.length) { $('#chSearchResults').innerHTML = '<div class="sr-empty">No matches.</div>'; return; }
+  $('#chSearchResults').innerHTML = res.map((r, i) => `
+    <div class="sr-item" data-i="${i}">
+      <div class="sr-ch">${escapeHtml(r.title)}</div>
+      <div class="sr-snip">${emphasize(r.snippet, q)}</div>
+    </div>`).join('');
+  $('#chSearchResults').querySelectorAll('.sr-item').forEach(el => {
+    const r = res[+el.dataset.i];
+    el.onclick = () => { CUR_BACK = 'chapters'; openChapter({ id: r.chapter_id, title: r.title }, CHAPTERS, r.idx, r.offset); };
+  });
+}
 
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveProgress(); });
 window.addEventListener('pagehide', saveProgress);
