@@ -709,8 +709,10 @@ async def add_book(file: UploadFile, user: dict = Depends(current_user)):
             headers={"Prefer": "return=representation"},
         )
         book = resp.json()[0]
+        # store plain text too (matches the reader's offsets) so search is fast
         rows = [{"user_id": uid, "book_id": book["id"], "idx": c["idx"],
-                 "title": c["title"], "html": c["html"]} for c in chapters]
+                 "title": c["title"], "html": c["html"],
+                 "text": html_to_model(c["html"])["text"]} for c in chapters]
         # insert chapters in batches to keep each request small
         for i in range(0, len(rows), 20):
             await _supabase("POST", "/book_chapters", json=rows[i:i + 20])
@@ -744,6 +746,39 @@ async def get_chapter(req: ChapterRequest, user: dict = Depends(current_user)):
                 "blocks": model["blocks"], "inlines": model["inlines"], "images": model["images"]}
 
     return {"job": start_job(work, uid)}
+
+
+@app.get("/api/books/{book_id}/search")
+async def search_book(book_id: str, q: str = "", user: dict = Depends(current_user)):
+    """Find a phrase inside a book; each hit's `offset` maps to the reader's TEXT."""
+    query = (q or "").strip()
+    if len(query) < 2:
+        return []
+    uid = user["id"]
+    resp = await _supabase(
+        "GET", f"/book_chapters?book_id=eq.{book_id}&user_id=eq.{uid}"
+               "&select=id,idx,title,text,html&order=idx.asc")
+    rows = resp.json()
+    ql = query.lower()
+    results = []
+    for row in rows:
+        text = row.get("text") or (html_to_model(row["html"])["text"] if row.get("html") else "")
+        low = text.lower()
+        start, hits = 0, 0
+        while hits < 3:                          # cap matches per chapter
+            k = low.find(ql, start)
+            if k < 0:
+                break
+            a, b = max(0, k - 40), min(len(text), k + len(query) + 40)
+            snippet = (("…" if a > 0 else "") + text[a:b].replace("\n", " ").strip()
+                       + ("…" if b < len(text) else ""))
+            results.append({"chapter_id": row["id"], "idx": row["idx"],
+                            "title": row.get("title") or f"Chapter {row['idx'] + 1}",
+                            "offset": k, "snippet": snippet})
+            start, hits = k + len(query), hits + 1
+        if len(results) >= 40:
+            break
+    return results[:40]
 
 
 @app.delete("/api/books/{book_id}")
