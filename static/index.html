@@ -473,6 +473,34 @@
 const $ = s => document.querySelector(s);
 const audio = $('#audio');
 
+// --- PWA background keepalive ---
+// In an installed (standalone) iOS PWA, iOS suspends the app's JS once ALL audio
+// stops, so a lock-screen "play" after a pause never reaches our MediaSession
+// handler. Keep an inaudible looping clip playing THROUGH pauses so the audio
+// session — and thus our handlers — stay alive and resume works handsfree. Gated
+// to standalone (Safari already works); a ~20-min idle cap bounds battery use.
+const KeepAlive = (() => {
+  const on = () => window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+  const SILENCE = 'data:audio/wav;base64,UklGRtQEAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YbAEAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA=';
+  let el = null, idleTimer = null;
+  function ensure() {
+    if (el) return el;
+    el = document.createElement('audio');
+    el.loop = true; el.volume = 0.02; el.setAttribute('playsinline', '');
+    el.src = SILENCE;
+    document.body.appendChild(el);
+    return el;
+  }
+  return {
+    // start/keep the silent loop (call inside a user gesture)
+    start() { if (!on()) return; clearTimeout(idleTimer); ensure().play().catch(() => {}); },
+    // narration paused: keep the session alive, but bound battery with an idle cap
+    holdWhilePaused() { if (!on()) return; clearTimeout(idleTimer); idleTimer = setTimeout(() => this.stop(), 20 * 60 * 1000); },
+    stop() { clearTimeout(idleTimer); if (el) { try { el.pause(); } catch (e) {} } },
+  };
+})();
+
 // --- Auth state + fetch wrapper ---
 // Every same-origin /api/* request carries the signed-in user's bearer token.
 // Wrapping fetch once covers runJob, apiJSON, and the raw fetch call sites
@@ -987,6 +1015,7 @@ $('#back').onclick = () => {
   $('#hero').classList.add('hidden');   // don't flash a stale banner on reopen
   $('#title').classList.add('hidden');
   MoodMusic.stop();
+  KeepAlive.stop();       // leaving the reader: release the audio session
   MediaControls.clear();
   clearActive();
   if (CUR_BACK === 'list') loadList();   // refresh cards so the "% read" badge updates
@@ -1132,6 +1161,7 @@ async function playFrom(i, seekTime = 0) {
   if (i < 0 || i >= CHUNKS.length) return;
   const mine = genId;
   _wantPlay = true;
+  KeepAlive.start();      // runs inside the play gesture, so iOS allows it
   playing = i;
   updateNote('Loading audio…');
   prefetch(i);
@@ -1829,10 +1859,13 @@ async function recoverPlayback() {
 async function doPlay() {
   _wantPlay = true;
   _recoverTries = 0;        // each explicit play intent gets a fresh set of retries
+  KeepAlive.start();        // hold the audio session open (installed PWA)
   try { await audio.play(); }
   catch (e) { await recoverPlayback(); }   // stale source / blocked -> self-heal
 }
-function doPause() { _wantPlay = false; audio.pause(); MoodMusic.stop(); }   // explicit pause stops the score
+// Pause narration but DON'T stop the keepalive — that's what keeps iOS from
+// suspending the PWA, so the lock-screen/AirPods play handler still fires.
+function doPause() { _wantPlay = false; audio.pause(); MoodMusic.stop(); KeepAlive.holdWhilePaused(); }
 function prevPart() {   // podcast-style: restart the current part if we're >3s in
   if (playing < 0) return;
   _wantPlay = true;
@@ -1845,7 +1878,9 @@ function nextPart() {
 }
 $('#play').onclick = () => { if (audio.paused) doPlay(); else doPause(); };
 audio.addEventListener('play', () => { $('#play').innerHTML = ICON_PAUSE; MediaControls.state('playing'); });
-audio.addEventListener('pause', () => { $('#play').innerHTML = ICON_PLAY; MediaControls.state('paused'); });
+// Catch-all for pauses that bypass doPause() (interruptions, route changes) —
+// keep the session held so a lock-screen resume still reaches us.
+audio.addEventListener('pause', () => { $('#play').innerHTML = ICON_PLAY; MediaControls.state('paused'); KeepAlive.holdWhilePaused(); });
 // 'playing' fires each time audio actually resumes (incl. part/chapter changes) —
 // keep the music going across those without dipping.
 audio.addEventListener('playing', () => { _recoverTries = 0; if (musicOn) { MoodMusic.start(); updateMood(); } });
