@@ -244,6 +244,45 @@
     opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  /* Profile screen */
+  .pf-head { display: flex; flex-direction: column; align-items: center; gap: 10px;
+             padding: 8px 0 26px; }
+  .pf-avatar { width: 88px; height: 88px; border-radius: 50%; object-fit: cover;
+               background: var(--chip); }
+  .pf-email { font-size: 15px; color: var(--muted); overflow-wrap: anywhere; text-align: center; }
+  .pf-stats { display: flex; justify-content: center; gap: 0; padding: 4px 0 22px;
+              border-bottom: 1px solid var(--line); margin-bottom: 6px; }
+  .pf-stat { flex: 1; text-align: center; }
+  .pf-stat-num { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .pf-stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase;
+                   letter-spacing: .03em; margin-top: 2px; }
+  .pf-row { display: flex; align-items: center; gap: 14px; padding: 15px 4px;
+            border-bottom: 1px solid var(--line); cursor: pointer; }
+  .pf-row-icon { flex: none; width: 22px; height: 22px; display: flex; align-items: center;
+                 justify-content: center; color: var(--accent); }
+  .pf-row-label { flex: 1; font-size: 16px; }
+  .pf-row-chev { flex: none; color: var(--muted); font-size: 18px; }
+
+  /* Settings screen */
+  .st-card { border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+             margin-bottom: 20px; background: var(--panel); }
+  .st-row { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            padding: 16px; border-bottom: 1px solid var(--line); }
+  .st-card .st-row:last-child { border-bottom: none; }
+  .st-row-title { font-size: 16px; font-weight: 600; }
+  .st-row-sub { font-size: 13px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+  .st-signout { padding: 9px 16px; font-size: 14px; }
+  .st-soon { flex: none; font-size: 11px; font-weight: 700; letter-spacing: .03em;
+             text-transform: uppercase; color: var(--muted); background: var(--chip);
+             padding: 4px 9px; border-radius: 999px; }
+
+  /* Shared "coming soon" stub screen */
+  .stub-body { display: flex; flex-direction: column; align-items: center; text-align: center;
+               gap: 14px; padding: 80px 20px; color: var(--muted); }
+  .stub-icon { width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; }
+  .stub-icon svg { width: 100%; height: 100%; }
+  .stub-msg { font-size: 16px; max-width: 280px; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -359,6 +398,95 @@
 
 <input id="epubInput" type="file" accept=".epub,application/epub+zip" style="display:none">
 
+<!-- ===== PROFILE VIEW ===== -->
+<div id="profileView" class="hidden">
+  <header>
+    <div class="bar bar-between">
+      <div style="display:flex; align-items:center;">
+        <button id="profileBack" class="icon" aria-label="Back to list">‹</button>
+        <h1 class="app-title" style="margin-left:4px;">Profile</h1>
+      </div>
+      <button id="profileSettingsBtn" class="icon" aria-label="Settings">⚙</button>
+    </div>
+  </header>
+  <main>
+    <div class="pf-head">
+      <img id="pfAvatar" class="pf-avatar" alt="">
+      <div class="pf-email" id="pfEmail"></div>
+    </div>
+    <div class="pf-stats">
+      <div class="pf-stat"><div class="pf-stat-num" id="pfBooks">–</div><div class="pf-stat-label">Books</div></div>
+      <div class="pf-stat"><div class="pf-stat-num" id="pfArticles">–</div><div class="pf-stat-label">Articles</div></div>
+      <div class="pf-stat"><div class="pf-stat-num" id="pfHighlights">–</div><div class="pf-stat-label">Highlights</div></div>
+    </div>
+    <div class="pf-list">
+      <div class="pf-row" id="pfStatsRow">
+        <span class="pf-row-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="20" x2="5" y2="12"/><line x1="12" y1="20" x2="12" y2="6"/><line x1="19" y1="20" x2="19" y2="15"/></svg></span>
+        <span class="pf-row-label">Stats</span>
+        <span class="pf-row-chev">›</span>
+      </div>
+      <div class="pf-row" id="pfStarredRow">
+        <span class="pf-row-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l2.6 5.6 6.1.6-4.6 4.2 1.3 6-5.4-3.1-5.4 3.1 1.3-6-4.6-4.2 6.1-.6z"/></svg></span>
+        <span class="pf-row-label">Starred</span>
+        <span class="pf-row-chev">›</span>
+      </div>
+      <div class="pf-row" id="pfBookmarksRow">
+        <span class="pf-row-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg></span>
+        <span class="pf-row-label">Bookmarks</span>
+        <span class="pf-row-chev">›</span>
+      </div>
+      <div class="pf-row" id="pfHistoryRow">
+        <span class="pf-row-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 16 14"/></svg></span>
+        <span class="pf-row-label">Listening History</span>
+        <span class="pf-row-chev">›</span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ===== SETTINGS VIEW ===== -->
+<div id="settingsView" class="hidden">
+  <header>
+    <div class="bar">
+      <button id="settingsBack" class="icon" aria-label="Back to profile">‹</button>
+      <h1 class="app-title" style="margin-left:4px;">Settings</h1>
+    </div>
+  </header>
+  <main>
+    <div class="st-card">
+      <div class="st-row">
+        <div>
+          <div class="st-row-title">Account</div>
+          <div class="st-row-sub" id="acctEmail"></div>
+        </div>
+        <button id="signOut" class="st-signout">Sign out</button>
+      </div>
+    </div>
+    <div class="st-card">
+      <div class="st-row"><span class="st-row-title">Appearance</span><span class="st-soon">Soon</span></div>
+      <div class="st-row"><span class="st-row-title">Notifications</span><span class="st-soon">Soon</span></div>
+      <div class="st-row"><span class="st-row-title">Data &amp; Storage</span><span class="st-soon">Soon</span></div>
+      <div class="st-row"><span class="st-row-title">About</span><span class="st-soon">Soon</span></div>
+    </div>
+  </main>
+</div>
+
+<!-- ===== STUB (COMING SOON) VIEW — shared shell for Stats/Starred/Listening History ===== -->
+<div id="stubView" class="hidden">
+  <header>
+    <div class="bar">
+      <button id="stubBack" class="icon" aria-label="Back to profile">‹</button>
+      <h1 class="app-title" id="stubTitle" style="margin-left:4px;">—</h1>
+    </div>
+  </header>
+  <main>
+    <div class="stub-body">
+      <div class="stub-icon" id="stubIcon"></div>
+      <div class="stub-msg" id="stubMessage">Coming soon.</div>
+    </div>
+  </main>
+</div>
+
 <!-- ===== READER VIEW ===== -->
 <div id="readerView" class="hidden">
   <header>
@@ -458,13 +586,6 @@
     </div>
     <input id="musicVol" type="range" min="0" max="100" value="40"
            style="width:100%; margin-top:14px; accent-color:var(--accent);">
-  </div>
-  <div class="field" id="acctField">
-    <div class="field-label">Account</div>
-    <div class="switch-row">
-      <span id="acctEmail" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted);"></span>
-      <button id="signOut" style="flex:none; background:none; border:1px solid var(--line); border-radius:8px; padding:7px 14px; font-size:14px; cursor:pointer;">Sign out</button>
-    </div>
   </div>
   <button id="sheetDone" class="primary">Done</button>
 </div>
@@ -821,6 +942,9 @@ function showView(v) {
   $('#highlightsView').classList.toggle('hidden', v !== 'highlights');
   $('#booksView').classList.toggle('hidden', v !== 'books');
   $('#chaptersView').classList.toggle('hidden', v !== 'chapters');
+  $('#profileView').classList.toggle('hidden', v !== 'profile');
+  $('#settingsView').classList.toggle('hidden', v !== 'settings');
+  $('#stubView').classList.toggle('hidden', v !== 'stub');
 }
 
 // Direct JSON request for the fast highlight endpoints (Supabase ops are < 1s).
@@ -1948,7 +2072,7 @@ async function handleShare() {
 }
 
 // --- Auth gate + init ---
-$('#acctBtn').onclick = () => openSheetEl($('#sheet'));
+$('#acctBtn').onclick = () => openProfile();
 $('#googleBtn').onclick = () => {
   if (SB) SB.auth.signInWithOAuth({ provider: 'google',
     options: { redirectTo: location.href.split('#')[0] } });
@@ -1979,6 +2103,51 @@ function showAuth() {
   $('#authView').style.display = 'flex';
 }
 
+// --- Profile / Settings / stub sections ---
+const PF_ICONS = {
+  stats: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="20" x2="5" y2="12"/><line x1="12" y1="20" x2="12" y2="6"/><line x1="19" y1="20" x2="19" y2="15"/></svg>',
+  starred: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3l2.6 5.6 6.1.6-4.6 4.2 1.3 6-5.4-3.1-5.4 3.1 1.3-6-4.6-4.2 6.1-.6z"/></svg>',
+  history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 16 14"/></svg>',
+};
+
+async function openProfile() {
+  showView('profile');
+  window.scrollTo(0, 0);
+  $('#pfEmail').textContent = (USER && USER.email) || '';
+  $('#pfAvatar').src = (USER && (USER.avatarUrl || Placeholder.art(USER.id, 200, 200))) || '';
+  $('#pfBooks').textContent = '–'; $('#pfArticles').textContent = '–'; $('#pfHighlights').textContent = '–';
+  try {
+    const [articles, books, highlights] = await Promise.all([
+      apiJSON('GET', '/api/articles'),
+      apiJSON('GET', '/api/books'),
+      apiJSON('GET', '/api/highlights'),
+    ]);
+    $('#pfArticles').textContent = articles.length;
+    $('#pfBooks').textContent = books.length;
+    $('#pfHighlights').textContent = highlights.length;
+  } catch (e) { /* leave the dashes on failure */ }
+}
+$('#profileBack').onclick = () => showView('list');
+$('#profileSettingsBtn').onclick = () => openSettings();
+
+function openSettings() { showView('settings'); window.scrollTo(0, 0); }
+$('#settingsBack').onclick = () => showView('profile');
+
+function openStub(title, iconKey, message) {
+  $('#stubTitle').textContent = title;
+  $('#stubIcon').innerHTML = PF_ICONS[iconKey] || '';
+  $('#stubMessage').textContent = message || 'Coming soon.';
+  showView('stub');
+  window.scrollTo(0, 0);
+}
+$('#stubBack').onclick = () => showView('profile');
+
+$('#pfStatsRow').onclick = () => openStub('Stats', 'stats', 'Detailed listening and reading stats are coming soon.');
+$('#pfStarredRow').onclick = () => openStub('Starred', 'starred', 'Starring articles and books is coming soon.');
+$('#pfHistoryRow').onclick = () => openStub('Listening History', 'history', 'Your listening history will show up here soon.');
+// "Bookmarks" is the existing Highlights feature — a second entry point, no new screen.
+$('#pfBookmarksRow').onclick = () => openHighlightsScreen();
+
 async function boot() {
   let cfg = {};
   try { cfg = await fetch('/api/config').then(r => r.json()); } catch (e) {}
@@ -1989,7 +2158,9 @@ async function boot() {
   SB = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
   const setSession = s => {
     AUTH_TOKEN = s?.access_token || null;
-    USER = s?.user ? { id: s.user.id, email: s.user.email } : null;
+    const meta = s?.user?.user_metadata || {};
+    USER = s?.user ? { id: s.user.id, email: s.user.email,
+      avatarUrl: meta.avatar_url || meta.picture || null } : null;
   };
   const { data: { session } } = await SB.auth.getSession();
   setSession(session);
