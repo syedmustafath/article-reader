@@ -10,6 +10,7 @@ to character ranges so the frontend can highlight words in sync with the audio.
 
 import asyncio
 import base64
+import datetime
 import hashlib
 import json
 import os
@@ -100,6 +101,11 @@ class NoteUpdate(BaseModel):
 
 class ChapterRequest(BaseModel):
     chapter_id: str
+
+
+class ListenRequest(BaseModel):
+    day: str          # 'YYYY-MM-DD', the client's local date
+    seconds: int       # absolute total seconds listened on that day
 
 
 class MoodsRequest(BaseModel):
@@ -880,6 +886,29 @@ async def update_highlight(highlight_id: str, req: NoteUpdate,
 async def delete_highlight(highlight_id: str, user: dict = Depends(current_user)):
     await _supabase("DELETE", f"/highlights?id=eq.{highlight_id}&user_id=eq.{user['id']}")
     return {"ok": True}
+
+
+# --- Listening-time stats (Supabase-backed) ---
+# The client is the authoritative tally for "today" and sends the absolute total
+# each flush; the server just upserts it (Prefer: merge-duplicates on the
+# (user_id, day) primary key), so no atomic-increment logic is needed here.
+@app.post("/api/stats/listen")
+async def post_listen(req: ListenRequest, user: dict = Depends(current_user)):
+    await _supabase(
+        "POST", "/listening_daily",
+        json={"user_id": user["id"], "day": req.day, "seconds": max(0, req.seconds)},
+        headers={"Prefer": "resolution=merge-duplicates"},
+    )
+    return {"ok": True}
+
+
+@app.get("/api/stats/listening")
+async def get_listening(days: int = 28, user: dict = Depends(current_user)):
+    cutoff = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+    resp = await _supabase(
+        "GET", f"/listening_daily?user_id=eq.{user['id']}&day=gte.{cutoff}"
+               "&select=day,seconds&order=day.asc")
+    return resp.json()
 
 
 @app.get("/")

@@ -108,6 +108,22 @@ alter table articles add column moods jsonb;
 alter table book_chapters add column moods jsonb;
 ```
 
+## Listening-time stats
+
+Profile → Stats tracks how many minutes you actually spend listening (wall-clock
+time narration is playing, independent of speed), synced to your account so it
+survives across devices. Add the table:
+
+```sql
+create table listening_daily (
+  user_id uuid references auth.users(id) on delete cascade,
+  day date not null,
+  seconds int not null default 0,
+  primary key (user_id, day)
+);
+alter table listening_daily enable row level security;
+```
+
 ## Share to Tolkien
 
 Send an article straight to your reading list from wherever you're reading it, via
