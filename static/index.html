@@ -283,6 +283,38 @@
   .stub-icon { width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; }
   .stub-icon svg { width: 100%; height: 100%; }
   .stub-msg { font-size: 16px; max-width: 280px; line-height: 1.5; }
+
+  /* Stats screen */
+  .sv-cards { display: flex; gap: 12px; margin-bottom: 20px; }
+  .sv-card { flex: 1; background: var(--panel); border: 1px solid var(--line);
+             border-radius: 14px; padding: 18px 14px; text-align: center; }
+  .sv-card-num { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .sv-card-label { font-size: 12px; color: var(--muted); text-transform: uppercase;
+                   letter-spacing: .03em; margin-top: 4px; }
+  .sv-chart-card { background: var(--panel); border: 1px solid var(--line);
+                   border-radius: 14px; padding: 18px 14px 14px; }
+  .sv-pager { display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
+              -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .sv-pager::-webkit-scrollbar { display: none; }
+  .sv-page { flex: none; width: 100%; scroll-snap-align: start; }
+  .sv-page-head { display: flex; align-items: center; justify-content: space-between;
+                  margin-bottom: 14px; min-height: 24px; }
+  .sv-page-title { font-size: 13px; font-weight: 700; color: var(--muted);
+                   text-transform: uppercase; letter-spacing: .03em; }
+  .sv-pct { font-size: 13px; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+            background: var(--chip); }
+  .sv-pct.up { color: #1f9d55; }
+  .sv-pct.down { color: var(--muted); }
+  .sv-bars { display: flex; align-items: flex-end; gap: 8px; height: 140px; }
+  .sv-bar { flex: 1; display: flex; flex-direction: column; align-items: center;
+            justify-content: flex-end; height: 100%; gap: 6px; }
+  .sv-bar-fill { width: 100%; max-width: 28px; background: var(--chip);
+                 border-radius: 6px 6px 3px 3px; min-height: 3px; }
+  .sv-bar.today .sv-bar-fill { background: var(--accent); }
+  .sv-bar-label { font-size: 11px; color: var(--muted); }
+  .sv-dots { display: flex; justify-content: center; gap: 6px; margin-top: 12px; }
+  .sv-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
+  .sv-dot.active { background: var(--accent); }
 </style>
 </head>
 <body>
@@ -487,6 +519,47 @@
   </main>
 </div>
 
+<!-- ===== STATS VIEW ===== -->
+<div id="statsView" class="hidden">
+  <header>
+    <div class="bar">
+      <button id="statsBack" class="icon" aria-label="Back to profile">‹</button>
+      <h1 class="app-title" style="margin-left:4px;">Stats</h1>
+    </div>
+  </header>
+  <main>
+    <div class="sv-cards">
+      <div class="sv-card">
+        <div class="sv-card-num" id="svToday">0</div>
+        <div class="sv-card-label">min today</div>
+      </div>
+      <div class="sv-card">
+        <div class="sv-card-num" id="svWeek">0</div>
+        <div class="sv-card-label">min this week</div>
+      </div>
+    </div>
+    <div class="sv-chart-card">
+      <div class="sv-pager" id="svPager">
+        <div class="sv-page">
+          <div class="sv-page-head">
+            <span class="sv-page-title">This week</span>
+            <span class="sv-pct" id="svPct"></span>
+          </div>
+          <div class="sv-bars" id="svBarsThis"></div>
+        </div>
+        <div class="sv-page">
+          <div class="sv-page-head"><span class="sv-page-title">Last week</span></div>
+          <div class="sv-bars" id="svBarsLast"></div>
+        </div>
+      </div>
+      <div class="sv-dots">
+        <span class="sv-dot active" data-p="0"></span>
+        <span class="sv-dot" data-p="1"></span>
+      </div>
+    </div>
+  </main>
+</div>
+
 <!-- ===== READER VIEW ===== -->
 <div id="readerView" class="hidden">
   <header>
@@ -676,6 +749,11 @@ let CUR_BOOK_COVER = null; // cover of the currently open book (for its chapters
 let CUR_BOOK_ID = null;   // id of the currently open book (for search + resume)
 let CUR_BOOK_TITLE = '';  // title of the currently open book
 let _lastT = 0;           // last-good playback time within the current chunk (recovery)
+// --- Listening-time tracking (Profile > Stats) ---
+let LISTEN = {};          // 'YYYY-MM-DD' -> seconds actually listened (wall-clock)
+let _listenTick = 0;      // Date.now() at the last accumulation tick (0 = not accumulating)
+let _listenPending = 0;   // seconds accrued since the last successful flush
+let _listenFlushAt = 0;   // Date.now() of the last flush attempt
 const WPM_1X = 180;       // measured pace of the default voice (Andrew) at 1x
 const SPEEDS = [1.0, 1.1, 1.2, 1.25, 1.35, 1.5];  // finer steps, capped at 1.5x
 // default 1.25x, but remember the user's last-used speed across sessions
@@ -945,6 +1023,7 @@ function showView(v) {
   $('#profileView').classList.toggle('hidden', v !== 'profile');
   $('#settingsView').classList.toggle('hidden', v !== 'settings');
   $('#stubView').classList.toggle('hidden', v !== 'stub');
+  $('#statsView').classList.toggle('hidden', v !== 'stats');
 }
 
 // Direct JSON request for the fast highlight endpoints (Supabase ops are < 1s).
@@ -1445,6 +1524,13 @@ audio.addEventListener('timeupdate', () => {
   }
   MediaControls.position();               // feed the lock-screen scrubber
   if (audio.currentTime > 0) _lastT = audio.currentTime;   // last-good pos for recovery
+  // Accumulate real elapsed wall-clock while actually playing (timeupdate only
+  // fires then) — capped per tick so a throttled/backgrounded gap can't over-count.
+  if (!audio.paused) {
+    const now = Date.now();
+    if (_listenTick) addListen(Math.min((now - _listenTick) / 1000, 2));
+    _listenTick = now;
+  }
   if (Date.now() - lastSave > 4000) { lastSave = Date.now(); saveProgress(); }
 });
 
@@ -1852,6 +1938,50 @@ function loadBookLast(id) {
   try { return JSON.parse(localStorage.getItem(bookLastKey(id)) || 'null'); } catch (e) { return null; }
 }
 
+// --- Listening-time tracking (Profile > Stats) ---
+// Wall-clock seconds the narration is actually playing — rate-independent, and it
+// naturally counts locked-screen/AirPods listening because playing audio is what
+// keeps the PWA's JS (and this accumulation) alive in the background. LISTEN is
+// cached in localStorage for instant/offline rendering and flushed to the server
+// (the durable, cross-device record) periodically and on backgrounding.
+function dateKeyFromDate(d) {   // 'YYYY-MM-DD' in local time
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function todayKey() { return dateKeyFromDate(new Date()); }   // local calendar date, so the day boundary is the user's midnight
+const listenKey = () => 'nvr_listen_' + (USER ? USER.id : 'anon');
+function persistListen() { try { localStorage.setItem(listenKey(), JSON.stringify(LISTEN)); } catch (e) {} }
+function loadListenLocal() {
+  try { LISTEN = JSON.parse(localStorage.getItem(listenKey()) || '{}') || {}; } catch (e) { LISTEN = {}; }
+}
+function addListen(sec) {
+  if (!(sec > 0)) return;
+  const k = todayKey();
+  LISTEN[k] = (LISTEN[k] || 0) + sec;
+  _listenPending += sec;
+  persistListen();
+  if (_listenPending > 45 || Date.now() - _listenFlushAt > 45000) flushListen();
+}
+async function flushListen() {
+  if (!USER) return;
+  _listenFlushAt = Date.now();
+  const k = todayKey();
+  try {
+    await apiJSON('POST', '/api/stats/listen', { day: k, seconds: Math.round(LISTEN[k] || 0) });
+    _listenPending = 0;
+  } catch (e) { /* stays in LISTEN/localStorage; retried on the next tick */ }
+}
+// Pull the server's history and merge (max per day) so a second device's
+// progress on a shared day is never clobbered by this device's local cache.
+async function reconcileListen() {
+  if (!USER) return;
+  loadListenLocal();
+  try {
+    const rows = await apiJSON('GET', '/api/stats/listening?days=28');
+    for (const r of rows) LISTEN[r.day] = Math.max(LISTEN[r.day] || 0, r.seconds || 0);
+    persistListen();
+  } catch (e) {}
+}
+
 // --- Book search: find a line, jump straight to it ---
 $('#contents').onclick = () => { if (CHAPTERS.length) showView('chapters'); };
 let _searchTimer = null;
@@ -1886,8 +2016,8 @@ function renderSearchResults(res, q) {
   });
 }
 
-document.addEventListener('visibilitychange', () => { if (document.hidden) saveProgress(); });
-window.addEventListener('pagehide', saveProgress);
+document.addEventListener('visibilitychange', () => { if (document.hidden) { saveProgress(); flushListen(); } });
+window.addEventListener('pagehide', () => { saveProgress(); flushListen(); });
 
 // --- Lock-screen / AirPods media controls (MediaSession API) ---
 // Makes the OS treat narration like a podcast app: a now-playing card on the
@@ -2004,7 +2134,11 @@ $('#play').onclick = () => { if (audio.paused) doPlay(); else doPause(); };
 audio.addEventListener('play', () => { $('#play').innerHTML = ICON_PAUSE; MediaControls.state('playing'); });
 // Catch-all for pauses that bypass doPause() (interruptions, route changes) —
 // keep the session held so a lock-screen resume still reaches us.
-audio.addEventListener('pause', () => { $('#play').innerHTML = ICON_PLAY; MediaControls.state('paused'); KeepAlive.holdWhilePaused(); });
+audio.addEventListener('pause', () => {
+  $('#play').innerHTML = ICON_PLAY; MediaControls.state('paused'); KeepAlive.holdWhilePaused();
+  _listenTick = 0;    // don't count the paused gap as listening time
+  flushListen();
+});
 // 'playing' fires each time audio actually resumes (incl. part/chapter changes) —
 // keep the music going across those without dipping.
 audio.addEventListener('playing', () => { _recoverTries = 0; if (musicOn) { MoodMusic.start(); updateMood(); } });
@@ -2088,6 +2222,7 @@ let _appStarted = false;
 function enterApp() {
   $('#authView').style.display = 'none';
   if (USER) $('#acctEmail').textContent = USER.email || '';
+  reconcileListen();   // pull + merge this account's listening history
   if (_appStarted) { loadList(); return; }   // refresh on re-entry (e.g. account switch)
   _appStarted = true;
   MediaControls.init();
@@ -2142,7 +2277,72 @@ function openStub(title, iconKey, message) {
 }
 $('#stubBack').onclick = () => showView('profile');
 
-$('#pfStatsRow').onclick = () => openStub('Stats', 'stats', 'Detailed listening and reading stats are coming soon.');
+// --- Stats: minutes listened, weekly bar charts (Monday–Sunday) ---
+const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+function mondayOf(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());   // local midnight
+  const day = x.getDay();                                          // 0=Sun..6=Sat
+  x.setDate(x.getDate() + (day === 0 ? -6 : 1 - day));
+  return x;
+}
+function weekDayKeys(monday) {
+  const out = [];
+  for (let i = 0; i < 7; i++) { const d = new Date(monday); d.setDate(d.getDate() + i); out.push(dateKeyFromDate(d)); }
+  return out;
+}
+function renderBars(containerId, keys, vals, maxSec, todayK) {
+  $('#' + containerId).innerHTML = keys.map((k, i) => {
+    const pct = Math.max(3, Math.round((vals[i] / maxSec) * 100));
+    return `<div class="sv-bar${k === todayK ? ' today' : ''}">
+      <div class="sv-bar-fill" style="height:${pct}%"></div>
+      <div class="sv-bar-label">${DAY_LETTERS[i]}</div>
+    </div>`;
+  }).join('');
+}
+function renderStats() {
+  const mon = mondayOf(new Date());
+  const thisKeys = weekDayKeys(mon);
+  const lastMon = new Date(mon); lastMon.setDate(lastMon.getDate() - 7);
+  const lastKeys = weekDayKeys(lastMon);
+  const thisVals = thisKeys.map(k => LISTEN[k] || 0);
+  const lastVals = lastKeys.map(k => LISTEN[k] || 0);
+  const thisTotal = thisVals.reduce((a, b) => a + b, 0);
+  const lastTotal = lastVals.reduce((a, b) => a + b, 0);
+
+  $('#svToday').textContent = Math.round((LISTEN[todayKey()] || 0) / 60);
+  $('#svWeek').textContent = Math.round(thisTotal / 60);
+
+  const maxSec = Math.max(...thisVals, ...lastVals, 60);   // floor so a quiet week isn't all full-height
+  renderBars('svBarsThis', thisKeys, thisVals, maxSec, todayKey());
+  renderBars('svBarsLast', lastKeys, lastVals, maxSec, null);
+
+  const pct = $('#svPct');
+  if (lastTotal <= 0) {
+    pct.textContent = thisTotal > 0 ? 'New' : '';
+    pct.className = 'sv-pct' + (thisTotal > 0 ? ' up' : '');
+  } else {
+    const change = Math.round(((thisTotal - lastTotal) / lastTotal) * 100);
+    pct.textContent = (change >= 0 ? '▲ ' : '▼ ') + Math.abs(change) + '% vs last week';
+    pct.className = 'sv-pct ' + (change >= 0 ? 'up' : 'down');
+  }
+}
+async function openStats() {
+  showView('stats');
+  window.scrollTo(0, 0);
+  $('#svPager').scrollLeft = 0;
+  document.querySelectorAll('.sv-dot').forEach((d, i) => d.classList.toggle('active', i === 0));
+  renderStats();               // instant paint from the local cache
+  await reconcileListen();     // then reconcile with the server (other devices, etc.)
+  renderStats();
+}
+$('#statsBack').onclick = () => showView('profile');
+$('#svPager').addEventListener('scroll', () => {
+  const p = $('#svPager');
+  const idx = Math.round(p.scrollLeft / p.clientWidth);
+  document.querySelectorAll('.sv-dot').forEach((d, i) => d.classList.toggle('active', i === idx));
+}, { passive: true });
+
+$('#pfStatsRow').onclick = () => openStats();
 $('#pfStarredRow').onclick = () => openStub('Starred', 'starred', 'Starring articles and books is coming soon.');
 $('#pfHistoryRow').onclick = () => openStub('Listening History', 'history', 'Your listening history will show up here soon.');
 // "Bookmarks" is the existing Highlights feature — a second entry point, no new screen.
