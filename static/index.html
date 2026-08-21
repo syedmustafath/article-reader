@@ -1227,6 +1227,7 @@ $('#back').onclick = () => {
   audio.removeAttribute('src');
   audio.load();
   genId++;              // cancel any in-flight synthesis
+  CHUNKS.forEach(releaseAudio);
   playing = -1;
   $('#player').classList.remove('on');
   $('#compass').classList.remove('show');
@@ -1354,12 +1355,28 @@ async function ensureChunk(i) {
     c.audioUrl = data.audio_url;
     c.marks = data.marks.map(m => ({ start: m.start + c.start, end: m.end + c.start, time: m.time }));
     renderArticle();
+    preloadAudio(c);
     return c;
   })();
   return c._promise;
 }
 // Keep a lookahead of 2 chunks warming up so the next part is ready in time.
 function prefetch(i) { for (let j = i; j <= i + 2; j++) ensureChunk(j).catch(() => {}); }
+
+// Download a chunk's mp3 bytes into a blob URL ahead of time, so the 'ended'
+// handler can swap to it with zero network latency (no pause between parts).
+function preloadAudio(c) {
+  if (!c || !c.audioUrl || c.blobUrl || c._blobPromise) return;
+  c._blobPromise = fetch(c.audioUrl)
+    .then(r => r.blob())
+    .then(b => { c.blobUrl = URL.createObjectURL(b); })
+    .catch(() => {});
+}
+// Revoke a chunk's blob URL once we're safely past it, to bound memory on long books.
+function releaseAudio(c) {
+  if (c && c.blobUrl) { URL.revokeObjectURL(c.blobUrl); c.blobUrl = null; }
+  if (c) c._blobPromise = null;
+}
 
 function bindChunk(c) {
   markIndex = (c.marks || []).map(m => ({ time: m.time, span: m._span }))
@@ -1388,7 +1405,7 @@ async function playFrom(i, seekTime = 0) {
   catch (e) { updateNote('Error: ' + e.message); return; }
   if (mine !== genId || playing !== i) return;
   bindChunk(c);
-  audio.src = c.audioUrl;
+  audio.src = c.blobUrl || c.audioUrl;
   audio.playbackRate = RATE;
   try { await audio.play(); } catch (e) { updateNote('Tap ▶ to play'); }
   if (seekTime) audio.currentTime = seekTime;
@@ -1412,10 +1429,11 @@ audio.addEventListener('ended', () => {
     return;
   }
   playing = next;
+  releaseAudio(CHUNKS[next - 3]);   // safely behind the lookahead window by now
   const c = CHUNKS[next];
   if (c && c.audioUrl) {
     bindChunk(c);
-    audio.src = c.audioUrl;
+    audio.src = c.blobUrl || c.audioUrl;
     audio.playbackRate = RATE;
     audio.play().catch(() => updateNote('Tap ▶ to continue'));
     updateNote('');
@@ -1425,7 +1443,7 @@ audio.addEventListener('ended', () => {
     ensureChunk(next).then(cc => {
       if (playing !== next) return;
       bindChunk(cc);
-      audio.src = cc.audioUrl;
+      audio.src = cc.blobUrl || cc.audioUrl;
       audio.playbackRate = RATE;
       audio.play().catch(() => updateNote('Tap ▶ to continue'));
       updateNote('');
@@ -1462,6 +1480,7 @@ async function openArticle(item, seekChar) {
     COVER = data.cover || null;
     totalWords = (TEXT.match(/\S+/g) || []).length;
     buildParagraphs(); classifyMoods();   // paragraph moods for background music
+    CHUNKS.forEach(releaseAudio);
     CHUNKS = data.chunks.map(c => ({ ...c, marks: null, audioUrl: null }));
     HIGHLIGHTS = hls || []; reanchorHighlights();
     $('#title').textContent = item.title || data.title;
@@ -1880,6 +1899,7 @@ async function openChapter(chapter, chapters, idx, seekChar) {
     COVER = CUR_BOOK_COVER || null;
     totalWords = (TEXT.match(/\S+/g) || []).length;
     buildParagraphs(); classifyMoods();   // paragraph moods for background music
+    CHUNKS.forEach(releaseAudio);
     CHUNKS = data.chunks.map(c => ({ ...c, marks: null, audioUrl: null }));
     HIGHLIGHTS = hls || []; reanchorHighlights();
     $('#title').textContent = chapter.title || data.title || 'Chapter';
@@ -2109,7 +2129,7 @@ async function recoverPlayback() {
   updateNote('Reconnecting…');
   try {
     const c = CHUNKS[i];
-    if (c) { c.audioUrl = null; c._promise = null; }   // force a fresh /audio URL
+    if (c) { c.audioUrl = null; c._promise = null; releaseAudio(c); }   // force a fresh /audio URL
     const fresh = await ensureChunk(i);
     if (mine !== genId || playing !== i) return;
     bindChunk(fresh);
