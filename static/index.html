@@ -276,8 +276,6 @@
   .st-soon { flex: none; font-size: 11px; font-weight: 700; letter-spacing: .03em;
              text-transform: uppercase; color: var(--muted); background: var(--chip);
              padding: 4px 9px; border-radius: 999px; }
-  .st-row-link { cursor: pointer; }
-  .st-row-link .st-row-chev { color: var(--muted); }
 
   /* Shared "coming soon" stub screen */
   .stub-body { display: flex; flex-direction: column; align-items: center; text-align: center;
@@ -516,12 +514,6 @@
       <div class="st-row"><span class="st-row-title">Notifications</span><span class="st-soon">Soon</span></div>
       <div class="st-row"><span class="st-row-title">Data &amp; Storage</span><span class="st-soon">Soon</span></div>
       <div class="st-row"><span class="st-row-title">About</span><span class="st-soon">Soon</span></div>
-    </div>
-    <div class="st-card">
-      <div class="st-row st-row-link" id="sendFeedbackRow">
-        <span class="st-row-title">Send Feedback</span>
-        <span class="st-row-chev">›</span>
-      </div>
     </div>
   </main>
 </div>
@@ -2313,9 +2305,6 @@ $('#profileSettingsBtn').onclick = () => openSettings();
 
 function openSettings() { showView('settings'); window.scrollTo(0, 0); }
 $('#settingsBack').onclick = () => showView('profile');
-$('#sendFeedbackRow').onclick = () => {
-  location.href = 'mailto:crackandbreak@gmail.com?subject=' + encodeURIComponent('Feedback for Tolkien');
-};
 
 function openStub(title, iconKey, message) {
   $('#stubTitle').textContent = title;
@@ -2396,7 +2385,9 @@ $('#pfStarredRow').onclick = () => openStub('Starred', 'starred', 'Starring arti
 $('#pfHistoryRow').onclick = () => openStub('Listening History', 'history', 'Your listening history will show up here soon.');
 // "Bookmarks" is the existing Highlights feature — a second entry point, no new screen.
 $('#pfBookmarksRow').onclick = () => openHighlightsScreen();
-$('#pfFeedbackRow').onclick = () => openStub('Send Feedback', 'feedback', 'Sending feedback from inside the app is coming soon.');
+$('#pfFeedbackRow').onclick = () => {
+  location.href = 'mailto:crackandbreak@gmail.com?subject=' + encodeURIComponent('Feedback for Tolkien');
+};
 $('#pfReviewRow').onclick = () => openStub('Leave a Review', 'review', 'Leaving a review is coming soon.');
 $('#pfShareRow').onclick = () => openStub('Share Tolkien', 'share', 'Sharing Tolkien with a friend is coming soon.');
 
