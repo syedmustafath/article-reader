@@ -649,6 +649,15 @@
   <button id="addSubmit" class="primary">Add to list</button>
 </div>
 
+<div class="sheet" id="shareSheet">
+  <div class="grab"></div>
+  <div class="field">
+    <div class="field-label">Share link</div>
+    <input id="shareLinkInput" type="url" readonly>
+  </div>
+  <button id="shareCopyBtn" class="primary">Copy link</button>
+</div>
+
 <div class="sheet" id="sheet">
   <div class="grab"></div>
   <div class="field">
@@ -1097,6 +1106,7 @@ function closeSheets() {
   $('#sheet').classList.remove('open');
   $('#addSheet').classList.remove('open');
   $('#hlSheet').classList.remove('open');
+  $('#shareSheet').classList.remove('open');
   $('#sheetBg').classList.remove('open');
 }
 $('#gear').onclick = () => openSheetEl($('#sheet'));
@@ -2389,7 +2399,24 @@ $('#pfFeedbackRow').onclick = () => {
   location.href = 'mailto:crackandbreak@gmail.com?subject=' + encodeURIComponent('Feedback for Tolkien');
 };
 $('#pfReviewRow').onclick = () => openStub('Leave a Review', 'review', 'Leaving a review is coming soon.');
-$('#pfShareRow').onclick = () => openStub('Share Tolkien', 'share', 'Sharing Tolkien with a friend is coming soon.');
+
+// --- Share Tolkien: native share sheet where available, else a copy-link sheet. ---
+async function shareTolkien() {
+  const url = location.origin;
+  const text = 'Tolkien — read your saved articles and books aloud with natural voices. Give it a try:';
+  if (navigator.share) {
+    try { await navigator.share({ title: 'Tolkien', text, url }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }   // user cancelled the native sheet
+  }
+  $('#shareLinkInput').value = url;
+  openSheetEl($('#shareSheet'));
+}
+$('#shareCopyBtn').onclick = async () => {
+  const input = $('#shareLinkInput');
+  try { await navigator.clipboard.writeText(input.value); toast('Link copied ✓'); }
+  catch (e) { input.select(); toast('Press ⌘/Ctrl+C to copy'); }
+};
+$('#pfShareRow').onclick = shareTolkien;
 
 async function boot() {
   let cfg = {};
