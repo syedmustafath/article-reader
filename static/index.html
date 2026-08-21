@@ -382,11 +382,8 @@
 <!-- ===== LIST VIEW ===== -->
 <div id="listView">
   <header>
-    <div class="bar bar-between">
+    <div class="bar">
       <h1 class="app-title">Tolkien</h1>
-      <div style="display:flex; gap:8px; align-items:center;">
-        <button id="addBtn" class="primary">+ Add</button>
-      </div>
     </div>
   </header>
   <main>
@@ -412,12 +409,9 @@
 <!-- ===== BOOKS VIEW ===== -->
 <div id="booksView" class="hidden">
   <header>
-    <div class="bar bar-between">
-      <div style="display:flex; align-items:center;">
-        <button id="booksBack" class="icon" aria-label="Back to list">‹</button>
-        <h1 class="app-title" style="margin-left:4px;">Books</h1>
-      </div>
-      <button id="uploadBtn" class="primary">+ Upload</button>
+    <div class="bar">
+      <button id="booksBack" class="icon" aria-label="Back to list">‹</button>
+      <h1 class="app-title" style="margin-left:4px;">Books</h1>
     </div>
   </header>
   <main>
@@ -650,6 +644,10 @@
     <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h5v16H6a2 2 0 0 0-2 2V5z"/><path d="M20 5a2 2 0 0 0-2-2h-5v16h5a2 2 0 0 1 2 2V5z"/></svg>
     <span>Books</span>
   </button>
+  <button class="bn-tab" id="bnAdd">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    <span>Add</span>
+  </button>
   <button class="bn-tab" id="bnProfile" data-view="profile">
     <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
     <span>Profile</span>
@@ -687,6 +685,20 @@
   </div>
   <div id="addErr" class="add-err"></div>
   <button id="addSubmit" class="primary">Add to list</button>
+</div>
+
+<div class="sheet" id="addChoiceSheet">
+  <div class="grab"></div>
+  <div class="pf-row" id="addUrlRow">
+    <span class="pf-row-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l2.6-2.6a4.5 4.5 0 0 0-6.4-6.4L11 6.5"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0L5 12.6a4.5 4.5 0 0 0 6.4 6.4l1.5-1.5"/></svg></span>
+    <span class="pf-row-label">Add article by URL</span>
+    <span class="pf-row-chev">›</span>
+  </div>
+  <div class="pf-row" id="addUploadRow">
+    <span class="pf-row-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h5v16H6a2 2 0 0 0-2 2V5z"/><path d="M20 5a2 2 0 0 0-2-2h-5v16h5a2 2 0 0 1 2 2V5z"/></svg></span>
+    <span class="pf-row-label">Upload a book</span>
+    <span class="pf-row-chev">›</span>
+  </div>
 </div>
 
 <div class="sheet" id="shareSheet">
@@ -1191,6 +1203,7 @@ function openSheetEl(el) { el.classList.add('open'); $('#sheetBg').classList.add
 function closeSheets() {
   $('#sheet').classList.remove('open');
   $('#addSheet').classList.remove('open');
+  $('#addChoiceSheet').classList.remove('open');
   $('#hlSheet').classList.remove('open');
   $('#shareSheet').classList.remove('open');
   $('#sheetBg').classList.remove('open');
@@ -1265,7 +1278,7 @@ function renderList(items) {
   if (!items.length) {
     $('#list').innerHTML = '';
     $('#listStatus').className = '';
-    $('#listStatus').textContent = 'No saved articles yet. Tap “+ Add article” to save one.';
+    $('#listStatus').textContent = 'No saved articles yet. Tap “Add” below to save one.';
     return;
   }
   $('#listStatus').textContent = '';
@@ -1318,7 +1331,18 @@ async function addArticle() {
     $('#addSubmit').textContent = 'Add to list';
   }
 }
-$('#addBtn').onclick = () => { $('#addUrl').value = ''; $('#addErr').textContent = ''; openSheetEl($('#addSheet')); $('#addUrl').focus(); };
+$('#bnAdd').onclick = () => openSheetEl($('#addChoiceSheet'));
+$('#addUrlRow').onclick = () => {
+  closeSheets();
+  $('#addUrl').value = ''; $('#addErr').textContent = '';
+  openSheetEl($('#addSheet'));
+  $('#addUrl').focus();
+};
+$('#addUploadRow').onclick = () => {
+  closeSheets();
+  $('#epubInput').click();   // synchronous — no await before this, or the file
+                              // picker won't be treated as user-initiated
+};
 $('#addSubmit').onclick = addArticle;
 $('#addUrl').addEventListener('keydown', e => { if (e.key === 'Enter') addArticle(); });
 
@@ -1900,7 +1924,7 @@ async function openBooksScreen() {
 function renderBooks(books) {
   if (!books.length) {
     $('#bookList').innerHTML = '';
-    $('#bookStatus').textContent = 'No books yet. Tap “+ Upload” to add an EPUB.';
+    $('#bookStatus').textContent = 'No books yet. Tap “Add” below to upload an EPUB.';
     return;
   }
   $('#bookStatus').textContent = '';
@@ -1930,8 +1954,8 @@ async function deleteBook(id, el) {
   catch (e) { el.style.opacity = 1; alert('Could not delete: ' + e.message); }
 }
 
-// Upload an EPUB (multipart) via the job API.
-$('#uploadBtn').onclick = () => $('#epubInput').click();
+// Upload an EPUB (multipart) via the job API. Triggered from the universal
+// Add button's choice sheet — see #addUploadRow.
 $('#epubInput').addEventListener('change', async e => {
   const file = e.target.files[0];
   e.target.value = '';
