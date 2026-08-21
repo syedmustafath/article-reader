@@ -49,7 +49,8 @@
   button:disabled { opacity: .5; cursor: default; }
   .icon { width: 44px; padding: 0; height: 44px; font-size: 19px; flex: none;
           display: flex; align-items: center; justify-content: center; }
-  main { max-width: 720px; margin: 0 auto; padding: 26px 20px 210px; }
+  main { max-width: 720px; margin: 0 auto; padding: 26px 20px 170px; }
+  #readerView main { padding-bottom: 210px; }  /* reader keeps its own bottom stack (.player only) */
 
   /* List view */
   #list { max-width: 720px; margin: 0 auto; }
@@ -110,6 +111,28 @@
             padding-bottom: max(12px, env(safe-area-inset-bottom)); display: none;
             box-shadow: 0 -6px 22px rgba(0,0,0,.07); }
   .player.on { display: block; }
+
+  /* Bottom tab nav + persistent "Now Playing" mini-player, both hidden in the reader */
+  .bottomnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 16; display: flex;
+               background: var(--panel); border-top: 1px solid var(--line);
+               padding: 6px 8px max(6px, env(safe-area-inset-bottom)); }
+  .bn-tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+            border: none; background: none; color: var(--muted); padding: 8px 4px; font-size: 11px; }
+  .bn-tab svg { width: 22px; height: 22px; }
+  .bn-tab.active { color: var(--accent); font-weight: 600; }
+
+  .miniplayer { position: fixed; left: 8px; right: 8px; z-index: 17;
+                bottom: calc(64px + env(safe-area-inset-bottom));
+                background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+                display: flex; align-items: center; gap: 10px; padding: 8px 10px; cursor: pointer;
+                box-shadow: 0 6px 20px rgba(0,0,0,.14); }
+  .mp-cover { width: 40px; height: 40px; border-radius: 8px; background: var(--chip) center/cover; flex: none; }
+  .mp-title { flex: 1; font-size: 14px; font-weight: 600; overflow: hidden;
+              text-overflow: ellipsis; white-space: nowrap; }
+  .mp-btn { border: none; background: none; color: var(--ink); width: 34px; height: 34px; flex: none;
+            display: flex; align-items: center; justify-content: center; padding: 0; }
+  .mp-btn svg { width: 20px; height: 20px; }
+
   .pwrap { max-width: 780px; margin: 0 auto; }
   #seek { width: 100%; accent-color: var(--accent); height: 24px; display: block; }
   .times { display: flex; justify-content: space-between; margin: 0 2px 4px;
@@ -362,15 +385,6 @@
     <div class="bar bar-between">
       <h1 class="app-title">Tolkien</h1>
       <div style="display:flex; gap:8px; align-items:center;">
-        <button id="booksBtn" class="icon" aria-label="Books">
-          <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h5v16H6a2 2 0 0 0-2 2V5z"/><path d="M20 5a2 2 0 0 0-2-2h-5v16h5a2 2 0 0 1 2 2V5z"/></svg>
-        </button>
-        <button id="hlScreenBtn" class="icon" aria-label="Highlights">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>
-        </button>
-        <button id="acctBtn" class="icon" aria-label="Account">
-          <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-        </button>
         <button id="addBtn" class="primary">+ Add</button>
       </div>
     </div>
@@ -619,6 +633,28 @@
 </div>
 
 <audio id="audio"></audio>
+
+<!-- ===== MINI PLAYER + BOTTOM NAV (persist across all non-reader views) ===== -->
+<div class="miniplayer hidden" id="miniPlayer">
+  <div class="mp-cover" id="mpCover"></div>
+  <div class="mp-title" id="mpTitle"></div>
+  <button class="mp-btn" id="mpPlayPause" aria-label="Play or pause"></button>
+  <button class="mp-btn" id="mpClose" aria-label="Stop">✕</button>
+</div>
+<nav class="bottomnav" id="bottomNav">
+  <button class="bn-tab" id="bnArticles" data-view="list">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>
+    <span>Articles</span>
+  </button>
+  <button class="bn-tab" id="bnBooks" data-view="books">
+    <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h5v16H6a2 2 0 0 0-2 2V5z"/><path d="M20 5a2 2 0 0 0-2-2h-5v16h5a2 2 0 0 1 2 2V5z"/></svg>
+    <span>Books</span>
+  </button>
+  <button class="bn-tab" id="bnProfile" data-view="profile">
+    <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+    <span>Profile</span>
+  </button>
+</nav>
 
 <!-- Floating selection toolbar (highlight / note) -->
 <div class="selbar" id="selbar">
@@ -1069,7 +1105,36 @@ function showView(v) {
   $('#settingsView').classList.toggle('hidden', v !== 'settings');
   $('#stubView').classList.toggle('hidden', v !== 'stub');
   $('#statsView').classList.toggle('hidden', v !== 'stats');
+  updateMiniPlayer();
+  updateBottomNav(v);
 }
+
+// --- Persistent mini-player + bottom tab nav (hidden while the reader itself is open) ---
+const TAB_FOR_VIEW = { list: 'bnArticles', highlights: 'bnArticles', books: 'bnBooks',
+  chapters: 'bnBooks', profile: 'bnProfile', settings: 'bnProfile', stub: 'bnProfile', stats: 'bnProfile' };
+function updateBottomNav(v) {
+  $('#bottomNav').classList.toggle('hidden', v === 'reader');
+  document.querySelectorAll('.bn-tab').forEach(b =>
+    b.classList.toggle('active', b.id === TAB_FOR_VIEW[v]));
+}
+function updateMiniPlayer() {
+  const loaded = $('#player').classList.contains('on');
+  const inReader = !$('#readerView').classList.contains('hidden');
+  $('#miniPlayer').classList.toggle('hidden', !loaded || inReader);
+  if (loaded) {
+    $('#mpTitle').textContent = CUR_TITLE || '';
+    $('#mpPlayPause').innerHTML = audio.paused ? ICON_PLAY : ICON_PAUSE;
+  }
+}
+$('#miniPlayer').addEventListener('click', e => {
+  if (e.target.closest('.mp-btn')) return;
+  showView('reader');
+});
+$('#mpPlayPause').onclick = () => { if (audio.paused) doPlay(); else doPause(); };
+$('#mpClose').onclick = () => stopPlayback();
+$('#bnArticles').onclick = () => { minimizeReader(); showView('list'); loadList(); };
+$('#bnBooks').onclick = () => { minimizeReader(); openBooksScreen(); };
+$('#bnProfile').onclick = () => { minimizeReader(); openProfile(); };
 
 // Direct JSON request for the fast highlight endpoints (Supabase ops are < 1s).
 async function apiJSON(method, url, body) {
@@ -1207,7 +1272,11 @@ function renderList(items) {
   $('#list').innerHTML = items.map(cardHtml).join('');
   $('#list').querySelectorAll('.card').forEach(el => {
     const item = items.find(x => x.id === el.dataset.id);
-    el.querySelector('.card-main').onclick = () => { CUR_BACK = 'list'; primeAudioForPlayback(); openArticle(item); };
+    el.querySelector('.card-main').onclick = () => {
+      CUR_BACK = 'list';
+      if (item.id === CUR_ID && CUR_TYPE === 'article') { showView('reader'); return; }   // already open — just expand
+      primeAudioForPlayback(); openArticle(item);
+    };
     el.querySelector('.del').onclick = () => deleteArticle(el.dataset.id, el);
   });
 }
@@ -1217,6 +1286,7 @@ async function deleteArticle(id, el) {
   try {
     const r = await fetch('/api/articles/' + id, { method: 'DELETE' });
     if (!r.ok) throw new Error((await r.json()).detail || 'Delete failed');
+    if (id === CUR_ID) stopPlayback();   // stop the copy of it we might be minimized-and-playing
     el.remove();
     if (!$('#list').children.length) renderList([]);
   } catch (e) {
@@ -1252,8 +1322,12 @@ $('#addBtn').onclick = () => { $('#addUrl').value = ''; $('#addErr').textContent
 $('#addSubmit').onclick = addArticle;
 $('#addUrl').addEventListener('keydown', e => { if (e.key === 'Enter') addArticle(); });
 
-$('#back').onclick = () => {
-  saveProgress();       // remember where we are for next time
+// Full teardown: actually end playback and release everything tied to it.
+// Call sites: the mini-player's ✕, sign-out, deleting the article/book that's
+// currently open, and opening a genuinely different item while another is loaded.
+// Leaving the reader by itself does NOT call this — see minimizeReader() below.
+function stopPlayback() {
+  saveProgress();
   audio.pause();
   audio.removeAttribute('src');
   audio.load();
@@ -1265,9 +1339,22 @@ $('#back').onclick = () => {
   $('#hero').classList.add('hidden');   // don't flash a stale banner on reopen
   $('#title').classList.add('hidden');
   MoodMusic.stop();
-  KeepAlive.stop();       // leaving the reader: release the audio session
+  KeepAlive.stop();
   MediaControls.clear();
   clearActive();
+  CUR_ID = null;         // nothing is "loaded" anymore
+  updateMiniPlayer();
+}
+
+// Leave the reader without stopping playback — audio/CHUNKS/genId/MoodMusic/
+// KeepAlive/MediaControls all keep running, which is what the mini-player shows.
+// Reused by the bottom-nav tab handlers whenever the reader is currently open.
+function minimizeReader() {
+  saveProgress();        // remember where we are for next time
+  $('#compass').classList.remove('show');
+}
+$('#back').onclick = () => {
+  minimizeReader();
   if (CUR_BACK === 'list') loadList();   // refresh cards so the "% read" badge updates
   showView(CUR_BACK || 'list');
 };
@@ -1453,7 +1540,7 @@ audio.addEventListener('ended', () => {
     clearActive(); clearProgress(CUR_ID);
     // in a book, flow straight into the next chapter
     if (CUR_TYPE === 'chapter' && CHAPTERS && CUR_CH_IDX + 1 < CHAPTERS.length) {
-      openChapter(CHAPTERS[CUR_CH_IDX + 1], CHAPTERS, CUR_CH_IDX + 1);
+      openChapter(CHAPTERS[CUR_CH_IDX + 1], CHAPTERS, CUR_CH_IDX + 1, undefined, { continuing: true });
     } else {
       updateNote('Finished');
     }
@@ -1486,12 +1573,16 @@ audio.addEventListener('ended', () => {
 // Open a saved article: switch to reader, extract text, render, play.
 // `seekChar` (optional) jumps to a spot — used when opening from a highlight.
 async function openArticle(item, seekChar) {
+  // Opening a genuinely different item while something else is loaded: stop it
+  // cleanly first (full teardown), rather than just resetting chunk state.
+  if (CUR_ID && (CUR_TYPE !== 'article' || CUR_ID !== item.id)) stopPlayback();
   showView('reader');
   window.scrollTo(0, 0);
   genId++;
   CUR_TYPE = 'article';
   CUR_ID = item.id; CUR_URL = item.url; CUR_TITLE = item.title;
   MediaControls.setMeta();   // now-playing card = article title
+  updateMiniPlayer();
   $('#contents').classList.add('hidden');   // articles have no chapter list
   HIGHLIGHTS = [];
   $('#status').className = '';
@@ -1737,7 +1828,6 @@ function scrollToChar(ch) {
 }
 
 // --- Highlights homepage screen ---
-$('#hlScreenBtn').onclick = openHighlightsScreen;
 $('#hlBack').onclick = () => showView('list');
 
 async function openHighlightsScreen() {
@@ -1794,7 +1884,6 @@ function renderHighlightsScreen(all) {
 // ============================================================
 //  BOOKS (EPUB)
 // ============================================================
-$('#booksBtn').onclick = openBooksScreen;
 $('#booksBack').onclick = () => showView('list');
 $('#chBack').onclick = () => showView('books');
 
@@ -1834,7 +1923,9 @@ function renderBooks(books) {
 
 async function deleteBook(id, el) {
   el.style.opacity = .4;
-  try { await apiJSON('DELETE', '/api/books/' + id); el.remove();
+  try { await apiJSON('DELETE', '/api/books/' + id);
+        if (CUR_TYPE === 'chapter' && CUR_BOOK_ID === id) stopPlayback();   // stop its chapter if minimized-and-playing
+        el.remove();
         if (!$('#bookList').children.length) renderBooks([]); }
   catch (e) { el.style.opacity = 1; alert('Could not delete: ' + e.message); }
 }
@@ -1901,18 +1992,27 @@ function renderChapters(chapters) {
     </div>`).join('');
   $('#chList').querySelectorAll('.ch-item').forEach(el => {
     const i = +el.dataset.idx;
-    el.onclick = () => { CUR_BACK = 'chapters'; primeAudioForPlayback(); openChapter(chapters[i], chapters, i); };
+    el.onclick = () => {
+      CUR_BACK = 'chapters';
+      if (chapters[i].id === CUR_ID && CUR_TYPE === 'chapter') { showView('reader'); return; }   // already open — just expand
+      primeAudioForPlayback(); openChapter(chapters[i], chapters, i);
+    };
   });
 }
 
-// Open a chapter — reads exactly like an article.
-async function openChapter(chapter, chapters, idx, seekChar) {
+// Open a chapter — reads exactly like an article. `opts.continuing` marks the
+// internal chapter-to-chapter auto-advance call (see the 'ended' handler) so it
+// skips the stop-teardown — that transition depends on the gapless-preload
+// blob URLs that stopPlayback() would otherwise revoke.
+async function openChapter(chapter, chapters, idx, seekChar, opts = {}) {
+  if (!opts.continuing && CUR_ID && (CUR_TYPE !== 'chapter' || CUR_ID !== chapter.id)) stopPlayback();
   showView('reader');
   window.scrollTo(0, 0);
   genId++;
   CUR_TYPE = 'chapter';
   CUR_ID = chapter.id; CUR_URL = null; CUR_TITLE = chapter.title;
   MediaControls.setMeta();   // now-playing card = chapter title / book album
+  updateMiniPlayer();
   CHAPTERS = chapters || [];
   CUR_CH_IDX = idx || 0;
   $('#contents').classList.remove('hidden');   // reader gets a "Contents" button
@@ -2063,7 +2163,7 @@ async function reconcileListen() {
 }
 
 // --- Book search: find a line, jump straight to it ---
-$('#contents').onclick = () => { if (CHAPTERS.length) showView('chapters'); };
+$('#contents').onclick = () => { if (CHAPTERS.length) { minimizeReader(); showView('chapters'); } };
 let _searchTimer = null;
 $('#chSearch').addEventListener('input', () => {
   clearTimeout(_searchTimer);
@@ -2211,13 +2311,14 @@ function nextPart() {
   if (playing >= 0 && playing + 1 < CHUNKS.length) playFrom(playing + 1);
 }
 $('#play').onclick = () => { if (audio.paused) doPlay(); else doPause(); };
-audio.addEventListener('play', () => { $('#play').innerHTML = ICON_PAUSE; MediaControls.state('playing'); });
+audio.addEventListener('play', () => { $('#play').innerHTML = ICON_PAUSE; MediaControls.state('playing'); updateMiniPlayer(); });
 // Catch-all for pauses that bypass doPause() (interruptions, route changes) —
 // keep the session held so a lock-screen resume still reaches us.
 audio.addEventListener('pause', () => {
   $('#play').innerHTML = ICON_PLAY; MediaControls.state('paused'); KeepAlive.holdWhilePaused();
   _listenTick = 0;    // don't count the paused gap as listening time
   flushListen();
+  updateMiniPlayer();
 });
 // 'playing' fires each time audio actually resumes (incl. part/chapter changes) —
 // keep the music going across those without dipping.
@@ -2286,13 +2387,13 @@ async function handleShare() {
 }
 
 // --- Auth gate + init ---
-$('#acctBtn').onclick = () => openProfile();
 $('#googleBtn').onclick = () => {
   if (SB) SB.auth.signInWithOAuth({ provider: 'google',
     options: { redirectTo: location.href.split('#')[0] } });
 };
 $('#signOut').onclick = async () => {
   closeSheets();
+  stopPlayback();
   if (SB) await SB.auth.signOut();
   AUTH_TOKEN = null; USER = null;
   showAuth();
