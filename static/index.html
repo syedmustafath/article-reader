@@ -552,6 +552,10 @@
         <div class="sv-card-num" id="svWeek">0</div>
         <div class="sv-card-label">min this week</div>
       </div>
+      <div class="sv-card">
+        <div class="sv-card-num" id="svStreak">🔥 0</div>
+        <div class="sv-card-label">day streak</div>
+      </div>
     </div>
     <div class="sv-chart-card">
       <div class="sv-pager" id="svPager">
@@ -1983,6 +1987,19 @@ function dateKeyFromDate(d) {   // 'YYYY-MM-DD' in local time
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 function todayKey() { return dateKeyFromDate(new Date()); }   // local calendar date, so the day boundary is the user's midnight
+// Consecutive active days ending today (or, if today has no listening yet, ending
+// yesterday — a day in progress doesn't break the streak until it actually lapses).
+function computeStreak() {
+  const cursor = new Date();
+  let streak = 0;
+  if (LISTEN[dateKeyFromDate(cursor)] > 0) streak++;
+  cursor.setDate(cursor.getDate() - 1);
+  while (LISTEN[dateKeyFromDate(cursor)] > 0) {
+    streak++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
 const listenKey = () => 'nvr_listen_' + (USER ? USER.id : 'anon');
 function persistListen() { try { localStorage.setItem(listenKey(), JSON.stringify(LISTEN)); } catch (e) {} }
 function loadListenLocal() {
@@ -2011,7 +2028,7 @@ async function reconcileListen() {
   if (!USER) return;
   loadListenLocal();
   try {
-    const rows = await apiJSON('GET', '/api/stats/listening?days=28');
+    const rows = await apiJSON('GET', '/api/stats/listening?days=400');   // wide enough that long streaks aren't truncated
     for (const r of rows) LISTEN[r.day] = Math.max(LISTEN[r.day] || 0, r.seconds || 0);
     persistListen();
   } catch (e) {}
@@ -2349,6 +2366,7 @@ function renderStats() {
 
   $('#svToday').textContent = Math.round((LISTEN[todayKey()] || 0) / 60);
   $('#svWeek').textContent = Math.round(thisTotal / 60);
+  $('#svStreak').textContent = '🔥 ' + computeStreak();
 
   const maxSec = Math.max(...thisVals, ...lastVals, 60);   // floor so a quiet week isn't all full-height
   renderBars('svBarsThis', thisKeys, thisVals, maxSec, todayKey());
