@@ -65,6 +65,8 @@
                width: 46px; flex: none; }
   #listStatus { color: var(--muted); text-align: center; padding: 44px 20px; font-size: 15px; }
   #listStatus.err { color: #d0402a; }
+  .libfilter { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin-bottom: 18px; }
+  .libfilter button.sel { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
 
   /* Reader view */
   #hero { width: 100%; height: 160px; border-radius: 14px; margin: 4px 0 20px;
@@ -224,8 +226,8 @@
   .hl-item-note { font-size: 14px; color: var(--muted); margin-top: 6px; }
   #hlListStatus { color: var(--muted); text-align: center; padding: 44px 20px; font-size: 15px; }
   #hlListStatus.err { color: #d0402a; }
-  /* Books + chapters */
-  #bookList, #chList { max-width: 720px; margin: 0 auto; }
+  /* Chapters */
+  #chList { max-width: 720px; margin: 0 auto; }
   .ch-item { display: flex; align-items: baseline; gap: 14px; padding: 15px 4px;
              border-bottom: 1px solid var(--line); cursor: pointer; }
   .ch-num { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 14px;
@@ -243,8 +245,8 @@
   .sr-snip { font-size: 14.5px; line-height: 1.45; }
   .sr-snip b { background: var(--uhl); border-radius: 3px; font-weight: 600; }
   .sr-empty { color: var(--muted); text-align: center; padding: 28px 20px; font-size: 15px; }
-  #bookStatus, #chStatus { color: var(--muted); text-align: center; padding: 44px 20px; font-size: 15px; }
-  #bookStatus.err, #chStatus.err { color: #d0402a; }
+  #chStatus { color: var(--muted); text-align: center; padding: 44px 20px; font-size: 15px; }
+  #chStatus.err { color: #d0402a; }
   /* Welcome splash */
   #splash { position: fixed; inset: 0; z-index: 100; background: var(--brand);
             display: flex; align-items: center; justify-content: center; flex-direction: column;
@@ -387,6 +389,7 @@
     </div>
   </header>
   <main>
+    <div class="libfilter" id="libFilter"></div>
     <div id="list"></div>
     <div id="listStatus"></div>
   </main>
@@ -406,25 +409,11 @@
   </main>
 </div>
 
-<!-- ===== BOOKS VIEW ===== -->
-<div id="booksView" class="hidden">
-  <header>
-    <div class="bar">
-      <button id="booksBack" class="icon" aria-label="Back to list">‹</button>
-      <h1 class="app-title" style="margin-left:4px;">Books</h1>
-    </div>
-  </header>
-  <main>
-    <div id="bookList"></div>
-    <div id="bookStatus"></div>
-  </main>
-</div>
-
 <!-- ===== CHAPTERS (TOC) VIEW ===== -->
 <div id="chaptersView" class="hidden">
   <header>
     <div class="bar">
-      <button id="chBack" class="icon" aria-label="Back to books">‹</button>
+      <button id="chBack" class="icon" aria-label="Back to library">‹</button>
       <h1 class="app-title" id="chBookTitle" style="margin-left:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Book</h1>
     </div>
   </header>
@@ -636,13 +625,9 @@
   <button class="mp-btn" id="mpClose" aria-label="Stop">✕</button>
 </div>
 <nav class="bottomnav" id="bottomNav">
-  <button class="bn-tab" id="bnArticles" data-view="list">
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>
-    <span>Articles</span>
-  </button>
-  <button class="bn-tab" id="bnBooks" data-view="books">
+  <button class="bn-tab" id="bnLibrary" data-view="list">
     <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h5v16H6a2 2 0 0 0-2 2V5z"/><path d="M20 5a2 2 0 0 0-2-2h-5v16h5a2 2 0 0 1 2 2V5z"/></svg>
-    <span>Books</span>
+    <span>Library</span>
   </button>
   <button class="bn-tab" id="bnAdd">
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -851,6 +836,8 @@ const WPM_1X = 180;       // measured pace of the default voice (Andrew) at 1x
 const SPEEDS = [1.0, 1.1, 1.2, 1.25, 1.35, 1.5];  // finer steps, capped at 1.5x
 // default 1.25x, but remember the user's last-used speed across sessions
 let RATE = (() => { const v = parseFloat(localStorage.getItem('nvr_rate')); return SPEEDS.includes(v) ? v : 1.25; })();
+let libraryFilter = localStorage.getItem('nvr_libfilter') || 'all';  // 'all' | 'article' | 'book'
+let LIBRARY_ITEMS = [];  // merged {kind:'article'|'book', ...} rows, cached for client-side re-filtering
 
 const escapeHtml = s => String(s).replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1111,7 +1098,6 @@ function showView(v) {
   $('#listView').classList.toggle('hidden', v !== 'list');
   $('#readerView').classList.toggle('hidden', v !== 'reader');
   $('#highlightsView').classList.toggle('hidden', v !== 'highlights');
-  $('#booksView').classList.toggle('hidden', v !== 'books');
   $('#chaptersView').classList.toggle('hidden', v !== 'chapters');
   $('#profileView').classList.toggle('hidden', v !== 'profile');
   $('#settingsView').classList.toggle('hidden', v !== 'settings');
@@ -1122,8 +1108,8 @@ function showView(v) {
 }
 
 // --- Persistent mini-player + bottom tab nav (hidden while the reader itself is open) ---
-const TAB_FOR_VIEW = { list: 'bnArticles', highlights: 'bnArticles', books: 'bnBooks',
-  chapters: 'bnBooks', profile: 'bnProfile', settings: 'bnProfile', stub: 'bnProfile', stats: 'bnProfile' };
+const TAB_FOR_VIEW = { list: 'bnLibrary', highlights: 'bnLibrary', chapters: 'bnLibrary',
+  profile: 'bnProfile', settings: 'bnProfile', stub: 'bnProfile', stats: 'bnProfile' };
 function updateBottomNav(v) {
   $('#bottomNav').classList.toggle('hidden', v === 'reader');
   document.querySelectorAll('.bn-tab').forEach(b =>
@@ -1144,8 +1130,7 @@ $('#miniPlayer').addEventListener('click', e => {
 });
 $('#mpPlayPause').onclick = () => { if (audio.paused) doPlay(); else doPause(); };
 $('#mpClose').onclick = () => stopPlayback();
-$('#bnArticles').onclick = () => { minimizeReader(); showView('list'); loadList(); };
-$('#bnBooks').onclick = () => { minimizeReader(); openBooksScreen(); };
+$('#bnLibrary').onclick = () => { minimizeReader(); showView('list'); loadLibrary(); };
 $('#bnProfile').onclick = () => { minimizeReader(); openProfile(); };
 
 // Direct JSON request for the fast highlight endpoints (Supabase ops are < 1s).
@@ -1241,15 +1226,21 @@ $('#musicVol').addEventListener('input', e => {
 });
 
 // ============================================================
-//  READING LIST
+//  LIBRARY (articles + books, merged with an All/Articles/Books filter)
 // ============================================================
-async function loadList() {
+async function loadLibrary() {
   $('#listStatus').className = '';
   $('#listStatus').textContent = 'Loading…';
   try {
-    const res = await fetch('/api/articles');
-    if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
-    renderList(await res.json());
+    const [articles, books] = await Promise.all([
+      apiJSON('GET', '/api/articles'),
+      apiJSON('GET', '/api/books'),
+    ]);
+    LIBRARY_ITEMS = [
+      ...articles.map(a => ({ ...a, kind: 'article' })),
+      ...books.map(b => ({ ...b, kind: 'book' })),
+    ].sort((x, y) => new Date(y.added_at || 0) - new Date(x.added_at || 0));
+    renderLibrary();
   } catch (e) {
     $('#list').innerHTML = '';
     $('#listStatus').className = 'err';
@@ -1257,40 +1248,66 @@ async function loadList() {
   }
 }
 
-function cardHtml(a) {
-  const date = a.added_at
-    ? new Date(a.added_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
-  const p = loadProgress(a.id);
-  const read = p > 0.01 && p < 0.99 ? `${Math.round(p * 100)}% read` : '';
-  const meta = [a.domain, date, a.est_minutes ? `~${a.est_minutes} min` : '', read]
-    .filter(Boolean).join(' · ');
-  return `<div class="card" data-id="${a.id}">
-    <div class="card-thumb" style="background-image:url('${coverFor(a.id, a.cover, 76, 76)}')"></div>
+function libraryCardHtml(item) {
+  const date = item.added_at
+    ? new Date(item.added_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+  let meta;
+  if (item.kind === 'article') {
+    const p = loadProgress(item.id);
+    const read = p > 0.01 && p < 0.99 ? `${Math.round(p * 100)}% read` : '';
+    meta = [item.domain, date, item.est_minutes ? `~${item.est_minutes} min` : '', read]
+      .filter(Boolean).join(' · ');
+  } else {
+    meta = [item.author, (item.chapter_count || 0) + ' chapters'].filter(Boolean).join(' · ');
+  }
+  return `<div class="card" data-id="${escapeHtml(item.id)}">
+    <div class="card-thumb" style="background-image:url('${coverFor(item.id, item.cover, 76, 76)}')"></div>
     <div class="card-main">
-      <div class="card-title">${escapeHtml(a.title || a.url)}</div>
+      <div class="card-title">${escapeHtml(item.title || item.url || 'Untitled')}</div>
       <div class="card-meta">${escapeHtml(meta)}</div>
     </div>
     <button class="del" aria-label="Delete">×</button>
   </div>`;
 }
 
-function renderList(items) {
+const LIB_FILTERS = [['all', 'All'], ['article', 'Articles'], ['book', 'Books']];
+$('#libFilter').innerHTML = LIB_FILTERS.map(([f, label]) =>
+  `<button data-f="${f}"${f === libraryFilter ? ' class="sel"' : ''}>${label}</button>`).join('');
+$('#libFilter').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  libraryFilter = b.dataset.f;
+  try { localStorage.setItem('nvr_libfilter', libraryFilter); } catch (err) {}
+  $('#libFilter').querySelectorAll('button').forEach(x => x.classList.toggle('sel', x === b));
+  renderLibrary();
+});
+
+function renderLibrary() {
+  const items = LIBRARY_ITEMS.filter(x => libraryFilter === 'all' || x.kind === libraryFilter);
   if (!items.length) {
     $('#list').innerHTML = '';
     $('#listStatus').className = '';
-    $('#listStatus').textContent = 'No saved articles yet. Tap “Add” below to save one.';
+    $('#listStatus').textContent = libraryFilter === 'book'
+      ? 'No books yet. Tap “Add” below to upload an EPUB.'
+      : libraryFilter === 'article'
+      ? 'No saved articles yet. Tap “Add” below to save one.'
+      : 'Nothing saved yet. Tap “Add” below to get started.';
     return;
   }
   $('#listStatus').textContent = '';
-  $('#list').innerHTML = items.map(cardHtml).join('');
+  $('#list').innerHTML = items.map(libraryCardHtml).join('');
   $('#list').querySelectorAll('.card').forEach(el => {
-    const item = items.find(x => x.id === el.dataset.id);
+    const item = items.find(x => String(x.id) === el.dataset.id);
     el.querySelector('.card-main').onclick = () => {
-      CUR_BACK = 'list';
-      if (item.id === CUR_ID && CUR_TYPE === 'article') { showView('reader'); return; }   // already open — just expand
-      primeAudioForPlayback(); openArticle(item);
+      if (item.kind === 'article') {
+        CUR_BACK = 'list';
+        if (item.id === CUR_ID && CUR_TYPE === 'article') { showView('reader'); return; }   // already open — just expand
+        primeAudioForPlayback(); openArticle(item);
+      } else {
+        primeAudioForPlayback(); openBook(item);
+      }
     };
-    el.querySelector('.del').onclick = () => deleteArticle(el.dataset.id, el);
+    el.querySelector('.del').onclick = () =>
+      item.kind === 'article' ? deleteArticle(el.dataset.id, el) : deleteBook(el.dataset.id, el);
   });
 }
 
@@ -1300,8 +1317,9 @@ async function deleteArticle(id, el) {
     const r = await fetch('/api/articles/' + id, { method: 'DELETE' });
     if (!r.ok) throw new Error((await r.json()).detail || 'Delete failed');
     if (id === CUR_ID) stopPlayback();   // stop the copy of it we might be minimized-and-playing
+    LIBRARY_ITEMS = LIBRARY_ITEMS.filter(x => x.id !== id);
     el.remove();
-    if (!$('#list').children.length) renderList([]);
+    if (!$('#list').children.length) renderLibrary();
   } catch (e) {
     el.style.opacity = 1;
     alert('Could not delete: ' + e.message);
@@ -1323,7 +1341,7 @@ async function addArticle() {
   try {
     await addUrl(url);
     closeSheets();
-    await loadList();
+    await loadLibrary();
   } catch (e) {
     $('#addErr').textContent = 'Error: ' + e.message;
   } finally {
@@ -1379,7 +1397,7 @@ function minimizeReader() {
 }
 $('#back').onclick = () => {
   minimizeReader();
-  if (CUR_BACK === 'list') loadList();   // refresh cards so the "% read" badge updates
+  if (CUR_BACK === 'list') loadLibrary();   // refresh cards so the "% read" badge updates
   showView(CUR_BACK || 'list');
 };
 
@@ -1908,49 +1926,15 @@ function renderHighlightsScreen(all) {
 // ============================================================
 //  BOOKS (EPUB)
 // ============================================================
-$('#booksBack').onclick = () => showView('list');
-$('#chBack').onclick = () => showView('books');
-
-async function openBooksScreen() {
-  showView('books');
-  window.scrollTo(0, 0);
-  $('#bookList').innerHTML = '';
-  $('#bookStatus').className = '';
-  $('#bookStatus').textContent = 'Loading…';
-  try { renderBooks(await apiJSON('GET', '/api/books')); }
-  catch (e) { $('#bookStatus').className = 'err'; $('#bookStatus').textContent = 'Error: ' + e.message; }
-}
-
-function renderBooks(books) {
-  if (!books.length) {
-    $('#bookList').innerHTML = '';
-    $('#bookStatus').textContent = 'No books yet. Tap “Add” below to upload an EPUB.';
-    return;
-  }
-  $('#bookStatus').textContent = '';
-  $('#bookList').innerHTML = books.map(b => `
-    <div class="card" data-id="${escapeHtml(b.id)}">
-      <div class="card-thumb" style="background-image:url('${coverFor(b.id, b.cover, 76, 76)}')"></div>
-      <div class="card-main">
-        <div class="card-title">${escapeHtml(b.title || 'Untitled')}</div>
-        <div class="card-meta">${[escapeHtml(b.author || ''), (b.chapter_count || 0) + ' chapters']
-          .filter(Boolean).join(' · ')}</div>
-      </div>
-      <button class="del" aria-label="Delete">×</button>
-    </div>`).join('');
-  $('#bookList').querySelectorAll('.card').forEach(el => {
-    const book = books.find(x => x.id === el.dataset.id);
-    el.querySelector('.card-main').onclick = () => { primeAudioForPlayback(); openBook(book); };
-    el.querySelector('.del').onclick = () => deleteBook(el.dataset.id, el);
-  });
-}
+$('#chBack').onclick = () => showView('list');
 
 async function deleteBook(id, el) {
   el.style.opacity = .4;
   try { await apiJSON('DELETE', '/api/books/' + id);
         if (CUR_TYPE === 'chapter' && CUR_BOOK_ID === id) stopPlayback();   // stop its chapter if minimized-and-playing
+        LIBRARY_ITEMS = LIBRARY_ITEMS.filter(x => x.id !== id);
         el.remove();
-        if (!$('#bookList').children.length) renderBooks([]); }
+        if (!$('#list').children.length) renderLibrary(); }
   catch (e) { el.style.opacity = 1; alert('Could not delete: ' + e.message); }
 }
 
@@ -1960,8 +1944,8 @@ $('#epubInput').addEventListener('change', async e => {
   const file = e.target.files[0];
   e.target.value = '';
   if (!file) return;
-  $('#bookStatus').className = '';
-  $('#bookStatus').textContent = 'Parsing “' + file.name + '”… this can take a moment.';
+  $('#listStatus').className = '';
+  $('#listStatus').textContent = 'Parsing “' + file.name + '”… this can take a moment.';
   try {
     const fd = new FormData();
     fd.append('file', file);
@@ -1974,10 +1958,10 @@ $('#epubInput').addEventListener('change', async e => {
       if (j.status === 'done') break;
       if (j.status === 'error') throw new Error(j.error);
     }
-    renderBooks(await apiJSON('GET', '/api/books'));
+    await loadLibrary();
   } catch (err) {
-    $('#bookStatus').className = 'err';
-    $('#bookStatus').textContent = 'Error: ' + err.message;
+    $('#listStatus').className = 'err';
+    $('#listStatus').textContent = 'Error: ' + err.message;
   }
 });
 
@@ -2403,7 +2387,7 @@ async function handleShare() {
   try {
     const row = await addUrl(url);
     toast('Added ✓ ' + ((row && row.title) || 'article'));
-    await loadList();
+    await loadLibrary();
   } catch (e) {
     toast("Couldn't add — try again");
   }
@@ -2428,11 +2412,11 @@ function enterApp() {
   $('#authView').style.display = 'none';
   if (USER) $('#acctEmail').textContent = USER.email || '';
   reconcileListen();   // pull + merge this account's listening history
-  if (_appStarted) { loadList(); return; }   // refresh on re-entry (e.g. account switch)
+  if (_appStarted) { loadLibrary(); return; }   // refresh on re-entry (e.g. account switch)
   _appStarted = true;
   MediaControls.init();
   showView('list');
-  loadList();
+  loadLibrary();
   handleShare();
   setTimeout(() => $('#splash').classList.add('hide'), 400);
 }
