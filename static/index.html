@@ -65,7 +65,7 @@
                width: 46px; flex: none; }
   #listStatus, #ldStatus, #listsStatus { color: var(--muted); text-align: center; padding: 44px 20px; font-size: 15px; }
   #listStatus.err, #ldStatus.err, #listsStatus.err { color: #d0402a; }
-  .libfilter { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin-bottom: 18px; }
+  .libfilter { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; margin-bottom: 18px; }
   .libfilter button.sel { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
 
   /* Article cards: source tile + iOS-style swipe-reveal actions */
@@ -152,6 +152,12 @@
             border: none; background: none; color: var(--muted); padding: 8px 4px; font-size: 11px; }
   .bn-tab svg { width: 22px; height: 22px; }
   .bn-tab.active { color: var(--accent); font-weight: 600; }
+  #bnAdd { flex: 0 0 auto; width: 56px; height: 56px; margin: 0 6px;
+           position: relative; top: -20px;
+           border-radius: 50%; background: var(--accent); color: #fff;
+           box-shadow: 0 6px 16px rgba(0,0,0,.28), 0 2px 4px rgba(0,0,0,.16);
+           padding: 0; }
+  #bnAdd svg { width: 24px; height: 24px; }
 
   .miniplayer { position: fixed; left: 8px; right: 8px; z-index: 17;
                 bottom: calc(64px + env(safe-area-inset-bottom));
@@ -635,6 +641,16 @@
   </main>
 </div>
 
+<!-- ===== HOME VIEW (placeholder) ===== -->
+<div id="homeView" class="hidden">
+  <header>
+    <div class="bar">
+      <h1 class="app-title">Home</h1>
+    </div>
+  </header>
+  <main></main>
+</div>
+
 <!-- ===== READER VIEW ===== -->
 <div id="readerView" class="hidden">
   <header>
@@ -685,17 +701,20 @@
   <button class="mp-btn" id="mpClose" aria-label="Stop">✕</button>
 </div>
 <nav class="bottomnav" id="bottomNav">
+  <button class="bn-tab" id="bnHome" data-view="home">
+    <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10.5V19a1 1 0 0 0 1 1h3v-5h4v5h3a1 1 0 0 0 1-1v-8.5"/></svg>
+    <span>Home</span>
+  </button>
   <button class="bn-tab" id="bnLibrary" data-view="list">
     <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h5v16H6a2 2 0 0 0-2 2V5z"/><path d="M20 5a2 2 0 0 0-2-2h-5v16h5a2 2 0 0 1 2 2V5z"/></svg>
     <span>Library</span>
   </button>
+  <button class="bn-tab" id="bnAdd" aria-label="Add">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  </button>
   <button class="bn-tab" id="bnLists" data-view="lists">
     <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg>
     <span>Lists</span>
-  </button>
-  <button class="bn-tab" id="bnAdd">
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    <span>Add</span>
   </button>
   <button class="bn-tab" id="bnProfile" data-view="profile">
     <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>
@@ -923,7 +942,8 @@ const WPM_1X = 180;       // measured pace of the default voice (Andrew) at 1x
 const SPEEDS = [1.0, 1.1, 1.2, 1.25, 1.35, 1.5];  // finer steps, capped at 1.5x
 // default 1.25x, but remember the user's last-used speed across sessions
 let RATE = (() => { const v = parseFloat(localStorage.getItem('nvr_rate')); return SPEEDS.includes(v) ? v : 1.25; })();
-let libraryFilter = localStorage.getItem('nvr_libfilter') || 'all';  // 'all' | 'article' | 'book'
+let libraryFilter = ['article', 'book'].includes(localStorage.getItem('nvr_libfilter'))
+  ? localStorage.getItem('nvr_libfilter') : 'article';  // 'article' | 'book'
 let LIBRARY_ITEMS = [];  // merged {kind:'article'|'book', ...} rows, cached for client-side re-filtering
 let LISTS = [];          // custom lists: {id, name, created_at} (Queue isn't in here)
 let LIST_ITEMS = [];     // every membership row: {list_id, article_id, added_at}
@@ -1198,6 +1218,7 @@ function showView(v) {
   $('#statsView').classList.toggle('hidden', v !== 'stats');
   $('#listsView').classList.toggle('hidden', v !== 'lists');
   $('#listDetailView').classList.toggle('hidden', v !== 'listDetail');
+  $('#homeView').classList.toggle('hidden', v !== 'home');
   updateMiniPlayer();
   updateBottomNav(v);
 }
@@ -1205,7 +1226,7 @@ function showView(v) {
 // --- Persistent mini-player + bottom tab nav (hidden while the reader itself is open) ---
 const TAB_FOR_VIEW = { list: 'bnLibrary', highlights: 'bnLibrary', chapters: 'bnLibrary',
   profile: 'bnProfile', settings: 'bnProfile', stub: 'bnProfile', stats: 'bnProfile',
-  lists: 'bnLists', listDetail: 'bnLists' };
+  lists: 'bnLists', listDetail: 'bnLists', home: 'bnHome' };
 function updateBottomNav(v) {
   $('#bottomNav').classList.toggle('hidden', v === 'reader');
   document.querySelectorAll('.bn-tab').forEach(b =>
@@ -1241,6 +1262,7 @@ $('#bnLists').onclick = async () => {
   }
 };
 $('#bnProfile').onclick = () => { minimizeReader(); openProfile(); };
+$('#bnHome').onclick = () => { minimizeReader(); showView('home'); };
 
 // Direct JSON request for the fast highlight endpoints (Supabase ops are < 1s).
 async function apiJSON(method, url, body) {
@@ -1549,7 +1571,7 @@ document.addEventListener('pointerdown', e => {
 window.addEventListener('scroll', () => { if (SWIPE_OPEN_ROW) closeSwipeRows(null); },
                         { passive: true });
 
-const LIB_FILTERS = [['all', 'All'], ['article', 'Articles'], ['book', 'Books']];
+const LIB_FILTERS = [['article', 'Articles'], ['book', 'Books']];
 $('#libFilter').innerHTML = LIB_FILTERS.map(([f, label]) =>
   `<button data-f="${f}"${f === libraryFilter ? ' class="sel"' : ''}>${label}</button>`).join('');
 $('#libFilter').addEventListener('click', e => {
@@ -1587,15 +1609,13 @@ function bindCards(container, items, ctx) {
 function renderLibrary() {
   const items = LIBRARY_ITEMS.filter(x =>
     !(x.kind === 'article' && x.archived_at) &&
-    (libraryFilter === 'all' || x.kind === libraryFilter));
+    x.kind === libraryFilter);
   if (!items.length) {
     $('#list').innerHTML = '';
     $('#listStatus').className = '';
     $('#listStatus').textContent = libraryFilter === 'book'
       ? 'No books yet. Tap “Add” below to upload an EPUB.'
-      : libraryFilter === 'article'
-      ? 'No saved articles yet. Tap “Add” below to save one.'
-      : 'Nothing saved yet. Tap “Add” below to get started.';
+      : 'No saved articles yet. Tap “Add” below to save one.';
     return;
   }
   $('#listStatus').textContent = '';
