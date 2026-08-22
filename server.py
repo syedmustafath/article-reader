@@ -722,6 +722,15 @@ async def update_article(article_id: str, req: ArticleUpdate,
     return {"ok": True, **patch}
 
 
+@app.post("/api/articles/{article_id}/touch")
+async def touch_article(article_id: str, user: dict = Depends(current_user)):
+    """Mark an article as just opened -- feeds the Home tab's "Jump back in" row."""
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    await _supabase("PATCH", f"/articles?id=eq.{article_id}&user_id=eq.{user['id']}",
+                    json={"last_opened_at": now})
+    return {"ok": True}
+
+
 # --- Books (EPUB) ---
 @app.get("/api/books")
 async def list_books(user: dict = Depends(current_user)):
@@ -819,6 +828,15 @@ async def search_book(book_id: str, q: str = "", user: dict = Depends(current_us
 @app.delete("/api/books/{book_id}")
 async def delete_book(book_id: str, user: dict = Depends(current_user)):
     await _supabase("DELETE", f"/books?id=eq.{book_id}&user_id=eq.{user['id']}")
+    return {"ok": True}
+
+
+@app.post("/api/books/{book_id}/touch")
+async def touch_book(book_id: str, user: dict = Depends(current_user)):
+    """Mark a book as just opened -- feeds the Home tab's "Jump back in" row."""
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    await _supabase("PATCH", f"/books?id=eq.{book_id}&user_id=eq.{user['id']}",
+                    json={"last_opened_at": now})
     return {"ok": True}
 
 
@@ -1007,6 +1025,17 @@ async def delete_list_item(list_id: str, article_id: str,
     await _supabase("DELETE", f"/list_items?list_id=eq.{list_id}"
                               f"&article_id=eq.{article_id}&user_id=eq.{user['id']}")
     return {"ok": True}
+
+
+# --- Curated picks ("Tolkien selects", Home tab) ---
+# Global content curated by hand in the Supabase SQL editor, not owned by any
+# one user. Deliberate exception to the per-user-scoping invariant: no
+# &user_id filter below, on purpose. Still gated behind current_user so only
+# signed-in users can see it.
+@app.get("/api/curated")
+async def list_curated(user: dict = Depends(current_user)):
+    resp = await _supabase("GET", "/curated_articles?select=*&order=sort_order.asc,added_at.desc")
+    return resp.json()
 
 
 @app.get("/")
