@@ -119,6 +119,10 @@ class ArticleUpdate(BaseModel):
     queued: Optional[bool] = None
 
 
+class ListRequest(BaseModel):
+    name: str
+
+
 # --- Rich reading model ---
 # Articles and EPUB chapters are parsed from HTML into a structured model that
 # preserves formatting + images WITHOUT disturbing the plain-text offset stream
@@ -931,6 +935,75 @@ async def get_listening(days: int = 28, user: dict = Depends(current_user)):
         "GET", f"/listening_daily?user_id=eq.{user['id']}&day=gte.{cutoff}"
                "&select=day,seconds&order=day.asc")
     return resp.json()
+
+
+# --- Lists (Supabase-backed) ---
+# Queue is NOT a row here: it stays the `articles.queued_at` flag and the client
+# pins it as a virtual list. These tables back the user's own custom lists only.
+# list_items carries its own user_id (like book_chapters) so every query can be
+# scoped directly; deleting a list or an article cascades its memberships away.
+@app.get("/api/lists")
+async def list_lists(user: dict = Depends(current_user)):
+    resp = await _supabase(
+        "GET", f"/lists?select=id,name,created_at&user_id=eq.{user['id']}&order=created_at.asc")
+    return resp.json()
+
+
+@app.post("/api/lists")
+async def add_list(req: ListRequest, user: dict = Depends(current_user)):
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(400, "Name the list.")
+    resp = await _supabase(
+        "POST", "/lists", json={"user_id": user["id"], "name": name},
+        headers={"Prefer": "return=representation"},
+    )
+    created = resp.json()
+    return created[0] if isinstance(created, list) else created
+
+
+@app.patch("/api/lists/{list_id}")
+async def rename_list(list_id: str, req: ListRequest, user: dict = Depends(current_user)):
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(400, "Name the list.")
+    await _supabase("PATCH", f"/lists?id=eq.{list_id}&user_id=eq.{user['id']}",
+                    json={"name": name})
+    return {"ok": True, "name": name}
+
+
+@app.delete("/api/lists/{list_id}")
+async def delete_list(list_id: str, user: dict = Depends(current_user)):
+    """Memberships go with it — list_items.list_id is ON DELETE CASCADE."""
+    await _supabase("DELETE", f"/lists?id=eq.{list_id}&user_id=eq.{user['id']}")
+    return {"ok": True}
+
+
+@app.get("/api/list-items")
+async def list_list_items(user: dict = Depends(current_user)):
+    """Every membership row for the user; the client joins it against its library."""
+    resp = await _supabase(
+        "GET", f"/list_items?select=list_id,article_id,added_at&user_id=eq.{user['id']}"
+               "&order=added_at.desc")
+    return resp.json()
+
+
+@app.post("/api/lists/{list_id}/items/{article_id}")
+async def add_list_item(list_id: str, article_id: str, user: dict = Depends(current_user)):
+    await _supabase(
+        "POST", "/list_items",
+        json={"user_id": user["id"], "list_id": list_id, "article_id": article_id},
+        headers={"Prefer": "resolution=ignore-duplicates"},
+    )
+    return {"ok": True}
+
+
+@app.delete("/api/lists/{list_id}/items/{article_id}")
+async def delete_list_item(list_id: str, article_id: str,
+                           user: dict = Depends(current_user)):
+    await _supabase("DELETE", f"/list_items?list_id=eq.{list_id}"
+                              f"&article_id=eq.{article_id}&user_id=eq.{user['id']}")
+    return {"ok": True}
 
 
 @app.get("/")

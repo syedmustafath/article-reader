@@ -124,6 +124,36 @@ create table listening_daily (
 alter table listening_daily enable row level security;
 ```
 
+## Lists
+
+Articles can belong to any number of custom lists, alongside the built-in Queue
+(Queue stays a simple flag on `articles` — it isn't a row in either table below).
+Add the tables:
+
+```sql
+create table lists (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade,
+  name text not null,
+  created_at timestamptz default now()
+);
+
+create table list_items (
+  list_id uuid not null references lists(id) on delete cascade,
+  article_id uuid not null references articles(id) on delete cascade,
+  user_id uuid references auth.users(id) on delete cascade,
+  added_at timestamptz default now(),
+  primary key (list_id, article_id)
+);
+
+create index on lists(user_id);
+create index on list_items(user_id);
+create index on list_items(article_id);
+
+alter table lists enable row level security;
+alter table list_items enable row level security;
+```
+
 ## Share to Tolkien
 
 Send an article straight to your reading list from wherever you're reading it, via

@@ -38,7 +38,7 @@
   .bar-between { justify-content: space-between; }
   .app-title { font-size: 22px; font-weight: 800; margin: 0; letter-spacing: -.01em; }
   .spacer { flex: 1; }
-  input[type=url] {
+  input[type=url], #listName {
     width: 100%; padding: 13px; border: 1px solid var(--line);
     border-radius: 12px; background: var(--bg); color: var(--ink); font-size: 16px; }
   button { font-family: inherit; cursor: pointer; border: 1px solid var(--line);
@@ -53,7 +53,7 @@
   #readerView main { padding-bottom: 210px; }  /* reader keeps its own bottom stack (.player only) */
 
   /* List view */
-  #list, #queueList { max-width: 720px; margin: 0 auto; }
+  #list, #ldList, #listsRows { max-width: 720px; margin: 0 auto; }
   .card { display: flex; align-items: stretch; border: 1px solid var(--line);
           border-radius: 14px; margin-bottom: 12px; background: var(--panel); overflow: hidden; }
   .card-thumb { width: 76px; flex: none; background-size: cover; background-position: center; }
@@ -63,8 +63,8 @@
   .card-meta { font-size: 13px; color: var(--muted); }
   .card .del { border: none; background: none; color: var(--muted); font-size: 24px;
                width: 46px; flex: none; }
-  #listStatus, #queueStatus { color: var(--muted); text-align: center; padding: 44px 20px; font-size: 15px; }
-  #listStatus.err, #queueStatus.err { color: #d0402a; }
+  #listStatus, #ldStatus, #listsStatus { color: var(--muted); text-align: center; padding: 44px 20px; font-size: 15px; }
+  #listStatus.err, #ldStatus.err, #listsStatus.err { color: #d0402a; }
   .libfilter { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin-bottom: 18px; }
   .libfilter button.sel { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
 
@@ -78,8 +78,10 @@
   .sw-right { right: 0; }
   .sw-btn { border: none; border-radius: 0; width: 86px; padding: 0; color: #fff;
             font-size: 13px; font-weight: 650; }
-  .sw-btn.act-queue   { background: var(--accent); }
-  .sw-btn.act-unqueue { background: var(--muted); }
+  .sw-btn.act-lists   { background: var(--accent); }
+  .sw-btn.act-lists.on{ background: var(--muted); }
+  .sw-btn.act-remove  { background: var(--muted); }
+  .sw-btn.act-rename  { background: var(--accent); }
   .sw-btn.act-archive { background: var(--warn); }
   .sw-btn.act-delete  { background: var(--danger); }
   .src-tile { position: relative; width: 52px; height: 52px; flex: none; border-radius: 12px;
@@ -88,6 +90,13 @@
   .src-fav { position: absolute; inset: 0; width: 100%; height: 100%;
              object-fit: cover; background: #fff; }
   .sw-body { flex: 1; min-width: 0; cursor: pointer; }
+  .list-ico { flex: none; width: 52px; height: 52px; border-radius: 12px; background: var(--chip);
+              display: flex; align-items: center; justify-content: center; color: var(--accent); }
+  .newlist { width: 100%; margin-top: 4px; padding: 14px; font-weight: 600; }
+  .pick-rows { max-height: 46vh; overflow-y: auto; }
+  .pick-check { flex: none; width: 24px; text-align: center; color: var(--accent);
+                font-size: 17px; font-weight: 800; }
+  .pick-row.on .pf-row-label { font-weight: 650; }
 
   /* Reader view */
   #hero { width: 100%; height: 160px; border-radius: 14px; margin: 4px 0 20px;
@@ -597,16 +606,32 @@
   </main>
 </div>
 
-<!-- ===== QUEUE VIEW ===== -->
-<div id="queueView" class="hidden">
+<!-- ===== LISTS VIEW (Queue + the user's own lists) ===== -->
+<div id="listsView" class="hidden">
   <header>
     <div class="bar">
-      <h1 class="app-title">Queue</h1>
+      <h1 class="app-title">Lists</h1>
     </div>
   </header>
   <main>
-    <div id="queueList"></div>
-    <div id="queueStatus"></div>
+    <div id="listsRows"></div>
+    <button id="newListBtn" class="newlist">＋ New List</button>
+    <div id="listsStatus"></div>
+  </main>
+</div>
+
+<!-- ===== LIST DETAIL (one list: Queue or a custom list) ===== -->
+<div id="listDetailView" class="hidden">
+  <header>
+    <div class="bar">
+      <button id="ldBack" class="icon" aria-label="Back to lists">‹</button>
+      <h1 class="app-title" id="ldTitle"
+          style="margin-left:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Queue</h1>
+    </div>
+  </header>
+  <main>
+    <div id="ldList"></div>
+    <div id="ldStatus"></div>
   </main>
 </div>
 
@@ -616,6 +641,7 @@
     <div class="bar">
       <button id="back" class="icon" aria-label="Back to list">‹</button>
       <div class="spacer"></div>
+      <button id="addToList" class="icon hidden" aria-label="Add to lists"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M6 3h9a1 1 0 0 1 1 1v17l-5.5-3.2L5 21V4a1 1 0 0 1 1-1z"/><line x1="19" y1="4" x2="19" y2="10"/><line x1="16" y1="7" x2="22" y2="7"/></svg></button>
       <button id="contents" class="icon hidden" aria-label="Contents"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg></button>
       <button id="gear" class="icon" aria-label="Settings">⚙</button>
     </div>
@@ -663,9 +689,9 @@
     <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h5v16H6a2 2 0 0 0-2 2V5z"/><path d="M20 5a2 2 0 0 0-2-2h-5v16h5a2 2 0 0 1 2 2V5z"/></svg>
     <span>Library</span>
   </button>
-  <button class="bn-tab" id="bnQueue" data-view="queue">
-    <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>
-    <span>Queue</span>
+  <button class="bn-tab" id="bnLists" data-view="lists">
+    <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg>
+    <span>Lists</span>
   </button>
   <button class="bn-tab" id="bnAdd">
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -722,6 +748,29 @@
     <span class="pf-row-label">Upload a book</span>
     <span class="pf-row-chev">›</span>
   </div>
+</div>
+
+<div class="sheet" id="pickSheet">
+  <div class="grab"></div>
+  <div class="field-label">Add to</div>
+  <div id="pickRows" class="pick-rows"></div>
+  <div class="pf-row" id="pickNewRow">
+    <span class="pf-row-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>
+    <span class="pf-row-label">New list</span>
+    <span class="pf-row-chev">›</span>
+  </div>
+  <button id="pickDone" class="primary">Done</button>
+</div>
+
+<div class="sheet" id="listNameSheet">
+  <div class="grab"></div>
+  <div class="field">
+    <div class="field-label" id="listNameLabel">New list</div>
+    <input id="listName" type="text" placeholder="Reading later…"
+           autocomplete="off" autocapitalize="sentences" autocorrect="off">
+  </div>
+  <div id="listNameErr" class="add-err"></div>
+  <button id="listNameSubmit" class="primary">Create list</button>
 </div>
 
 <div class="sheet" id="shareSheet">
@@ -876,6 +925,12 @@ const SPEEDS = [1.0, 1.1, 1.2, 1.25, 1.35, 1.5];  // finer steps, capped at 1.5x
 let RATE = (() => { const v = parseFloat(localStorage.getItem('nvr_rate')); return SPEEDS.includes(v) ? v : 1.25; })();
 let libraryFilter = localStorage.getItem('nvr_libfilter') || 'all';  // 'all' | 'article' | 'book'
 let LIBRARY_ITEMS = [];  // merged {kind:'article'|'book', ...} rows, cached for client-side re-filtering
+let LISTS = [];          // custom lists: {id, name, created_at} (Queue isn't in here)
+let LIST_ITEMS = [];     // every membership row: {list_id, article_id, added_at}
+let CUR_LIST = null;     // list open in the detail view: {id:'queue'|uuid, name}
+let EDIT_LIST = null;    // list open in the name sheet (null = creating one)
+let PICK_ITEM = null;    // article the "Add to…" picker is currently open for
+let PICK_RESUME = false; // reopen the picker after creating a list from inside it
 
 const escapeHtml = s => String(s).replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1141,7 +1196,8 @@ function showView(v) {
   $('#settingsView').classList.toggle('hidden', v !== 'settings');
   $('#stubView').classList.toggle('hidden', v !== 'stub');
   $('#statsView').classList.toggle('hidden', v !== 'stats');
-  $('#queueView').classList.toggle('hidden', v !== 'queue');
+  $('#listsView').classList.toggle('hidden', v !== 'lists');
+  $('#listDetailView').classList.toggle('hidden', v !== 'listDetail');
   updateMiniPlayer();
   updateBottomNav(v);
 }
@@ -1149,7 +1205,7 @@ function showView(v) {
 // --- Persistent mini-player + bottom tab nav (hidden while the reader itself is open) ---
 const TAB_FOR_VIEW = { list: 'bnLibrary', highlights: 'bnLibrary', chapters: 'bnLibrary',
   profile: 'bnProfile', settings: 'bnProfile', stub: 'bnProfile', stats: 'bnProfile',
-  queue: 'bnQueue' };
+  lists: 'bnLists', listDetail: 'bnLists' };
 function updateBottomNav(v) {
   $('#bottomNav').classList.toggle('hidden', v === 'reader');
   document.querySelectorAll('.bn-tab').forEach(b =>
@@ -1171,10 +1227,18 @@ $('#miniPlayer').addEventListener('click', e => {
 $('#mpPlayPause').onclick = () => { if (audio.paused) doPlay(); else doPause(); };
 $('#mpClose').onclick = () => stopPlayback();
 $('#bnLibrary').onclick = () => { minimizeReader(); showView('list'); loadLibrary(); };
-$('#bnQueue').onclick = async () => {
-  minimizeReader(); showView('queue');
-  if (!LIBRARY_ITEMS.length) await loadLibrary();
-  renderQueue();
+$('#bnLists').onclick = async () => {
+  minimizeReader(); showView('lists');
+  $('#listsStatus').className = ''; $('#listsStatus').textContent = 'Loading…';
+  try {
+    if (!LIBRARY_ITEMS.length) await loadLibrary();
+    await loadLists();
+    renderLists();
+  } catch (e) {
+    $('#listsRows').innerHTML = '';
+    $('#listsStatus').className = 'err';
+    $('#listsStatus').textContent = 'Error: ' + e.message;
+  }
 };
 $('#bnProfile').onclick = () => { minimizeReader(); openProfile(); };
 
@@ -1236,6 +1300,8 @@ function closeSheets() {
   $('#addChoiceSheet').classList.remove('open');
   $('#hlSheet').classList.remove('open');
   $('#shareSheet').classList.remove('open');
+  $('#pickSheet').classList.remove('open');
+  $('#listNameSheet').classList.remove('open');
   $('#sheetBg').classList.remove('open');
 }
 $('#gear').onclick = () => openSheetEl($('#sheet'));
@@ -1293,6 +1359,17 @@ async function loadLibrary() {
   }
 }
 
+// Pure fetch, no rendering — the picker needs lists available without touching
+// whatever screen (Library, Lists, list detail) happens to be on-screen.
+async function loadLists() {
+  const [lists, items] = await Promise.all([
+    apiJSON('GET', '/api/lists'),
+    apiJSON('GET', '/api/list-items'),
+  ]);
+  LISTS = lists;
+  LIST_ITEMS = items;
+}
+
 // --- Source icon: real favicon over a deterministic monogram fallback ---
 // Distinct from Placeholder/coverFor (generative contour art) — that stays for
 // book thumbs and the reader hero.
@@ -1334,7 +1411,7 @@ function relTime(iso) {
 }
 
 function libraryCardHtml(item) {
-  return item.kind === 'article' ? articleCardHtml(item, 'library') : bookCardHtml(item);
+  return item.kind === 'article' ? articleCardHtml(item, { name: 'library' }) : bookCardHtml(item);
 }
 
 function bookCardHtml(item) {
@@ -1349,8 +1426,8 @@ function bookCardHtml(item) {
   </div>`;
 }
 
-// ctx: 'library' -> right-swipe Queue toggle, left-swipe Archive + Delete
-//      'queue'   -> left-swipe Remove from Queue only, no right-swipe layer
+// ctx: { name: 'library' }                      -> right-swipe "Add to Lists", left-swipe Archive + Delete
+//      { name: 'listDetail', listId: 'queue'|id } -> left-swipe Remove from this list only, no right-swipe layer
 function articleCardHtml(item, ctx) {
   const p = loadProgress(item.id);
   const read = p > 0.01 && p < 0.99 ? `${Math.round(p * 100)}% read` : '';
@@ -1358,18 +1435,20 @@ function articleCardHtml(item, ctx) {
                 item.est_minutes ? `${item.est_minutes} min` : '', read]
     .filter(Boolean).join(' · ');
   let left = '';
-  if (ctx === 'library') {
-    left = item.queued_at
-      ? `<div class="sw-actions sw-left"><button class="sw-btn act-unqueue" data-act="unqueue">Queued</button></div>`
-      : `<div class="sw-actions sw-left"><button class="sw-btn act-queue" data-act="queue">＋ Queue</button></div>`;
+  if (ctx.name === 'library') {
+    const inAny = !!item.queued_at
+      || LIST_ITEMS.some(r => String(r.article_id) === String(item.id));
+    left = `<div class="sw-actions sw-left">
+      <button class="sw-btn act-lists${inAny ? ' on' : ''}" data-act="lists">${inAny ? '✓ Lists' : '＋ Lists'}</button>
+    </div>`;
   }
-  const right = ctx === 'library'
+  const right = ctx.name === 'library'
     ? `<div class="sw-actions sw-right">
          <button class="sw-btn act-archive" data-act="archive">Archive</button>
          <button class="sw-btn act-delete" data-act="delete">Delete</button>
        </div>`
     : `<div class="sw-actions sw-right">
-         <button class="sw-btn act-unqueue" data-act="unqueue">Remove</button>
+         <button class="sw-btn act-remove" data-act="remove">Remove</button>
        </div>`;
   return `<div class="card swipe" data-id="${escapeHtml(item.id)}">${left}${right}
     <div class="sw-content">
@@ -1488,7 +1567,7 @@ function bindCards(container, items, ctx) {
     const item = items.find(x => String(x.id) === el.dataset.id);
     el.querySelector('.sw-body, .card-main').onclick = () => {
       if (item.kind === 'article') {
-        CUR_BACK = ctx === 'queue' ? 'queue' : 'list';
+        CUR_BACK = ctx.name === 'listDetail' ? 'listDetail' : 'list';
         if (item.id === CUR_ID && CUR_TYPE === 'article') { showView('reader'); return; }   // already open — just expand
         primeAudioForPlayback(); openArticle(item);
       } else {
@@ -1521,23 +1600,49 @@ function renderLibrary() {
   }
   $('#listStatus').textContent = '';
   $('#list').innerHTML = items.map(libraryCardHtml).join('');
-  bindCards($('#list'), items, 'library');
+  bindCards($('#list'), items, { name: 'library' });
 }
 
-function renderQueue() {
-  const items = LIBRARY_ITEMS
-    .filter(x => x.kind === 'article' && x.queued_at && !x.archived_at)
-    .sort((a, b) => new Date(b.queued_at) - new Date(a.queued_at));
+// listId: 'queue' (virtual, backed by queued_at) or a custom list's uuid.
+function listArticles(listId) {
+  if (listId === 'queue')
+    return LIBRARY_ITEMS
+      .filter(x => x.kind === 'article' && x.queued_at && !x.archived_at)
+      .sort((a, b) => new Date(b.queued_at) - new Date(a.queued_at));
+  return LIST_ITEMS
+    .filter(r => String(r.list_id) === String(listId))
+    .sort((a, b) => new Date(b.added_at) - new Date(a.added_at))
+    .map(r => LIBRARY_ITEMS.find(x =>
+      x.kind === 'article' && String(x.id) === String(r.article_id)))
+    .filter(x => x && !x.archived_at);
+}
+
+function openList(list) {
+  if (!list) return;
+  CUR_LIST = { id: String(list.id), name: list.name };
+  showView('listDetail');
+  window.scrollTo(0, 0);
+  $('#ldTitle').textContent = CUR_LIST.name;
+  renderListDetail();
+}
+
+function renderListDetail() {
+  if (!CUR_LIST) return;
+  const items = listArticles(CUR_LIST.id);
+  const ctx = { name: 'listDetail', listId: CUR_LIST.id };
   if (!items.length) {
-    $('#queueList').innerHTML = '';
-    $('#queueStatus').className = '';
-    $('#queueStatus').textContent = 'Nothing queued yet. Swipe right on an article in your Library to add it here.';
+    $('#ldList').innerHTML = '';
+    $('#ldStatus').className = '';
+    $('#ldStatus').textContent = CUR_LIST.id === 'queue'
+      ? 'Nothing queued yet. Swipe right on an article in your Library to add it here.'
+      : 'This list is empty. Swipe right on an article in your Library to add it here.';
     return;
   }
-  $('#queueStatus').textContent = '';
-  $('#queueList').innerHTML = items.map(x => articleCardHtml(x, 'queue')).join('');
-  bindCards($('#queueList'), items, 'queue');
+  $('#ldStatus').textContent = '';
+  $('#ldList').innerHTML = items.map(x => articleCardHtml(x, ctx)).join('');
+  bindCards($('#ldList'), items, ctx);
 }
+$('#ldBack').onclick = () => { showView('lists'); renderLists(); };
 
 async function deleteArticle(id, el) {
   el.style.opacity = .4;
@@ -1546,6 +1651,7 @@ async function deleteArticle(id, el) {
     if (!r.ok) throw new Error((await r.json()).detail || 'Delete failed');
     if (id === CUR_ID) stopPlayback();   // stop the copy of it we might be minimized-and-playing
     LIBRARY_ITEMS = LIBRARY_ITEMS.filter(x => x.id !== id);
+    LIST_ITEMS = LIST_ITEMS.filter(r => String(r.article_id) !== String(id));
     el.remove();
     if (!$('#list').children.length) renderLibrary();
   } catch (e) {
@@ -1561,24 +1667,122 @@ async function patchArticle(item, patch) {
   return res;
 }
 
-// One handler for every swipe-tray button, in both Library and Queue.
+// listId 'queue' toggles the article's queued_at flag; any other id is a
+// custom list, backed by a real list_items row. Keeps LIST_ITEMS in sync
+// locally so every open view can redraw from cache with no refetch.
+async function setMembership(item, listId, on) {
+  if (listId === 'queue') { await patchArticle(item, { queued: on }); return; }
+  await apiJSON(on ? 'POST' : 'DELETE', '/api/lists/' + listId + '/items/' + item.id);
+  LIST_ITEMS = LIST_ITEMS.filter(r =>
+    !(String(r.list_id) === String(listId) && String(r.article_id) === String(item.id)));
+  if (on) LIST_ITEMS.push({ list_id: String(listId), article_id: String(item.id),
+                            added_at: new Date().toISOString() });
+}
+
+// Redraws whichever of Library/Lists/list-detail happens to be visible.
+function refreshAffectedViews() {
+  if (!$('#listView').classList.contains('hidden')) renderLibrary();
+  if (!$('#listsView').classList.contains('hidden')) renderLists();
+  if (!$('#listDetailView').classList.contains('hidden')) renderListDetail();
+}
+
+// One handler for every swipe-tray button, in both Library and list detail.
 async function swipeAction(act, item, el, ctx) {
   if (act === 'delete') { deleteArticle(String(item.id), el); return; }
+  if (act === 'lists') { el._swClose(); openPicker(item); return; }
   el.style.opacity = .4;
   try {
     if (act === 'archive') await patchArticle(item, { archived: true });
-    else if (act === 'queue') await patchArticle(item, { queued: true });
-    else if (act === 'unqueue') await patchArticle(item, { queued: false });
+    else if (act === 'remove') await setMembership(item, ctx.listId, false);
   } catch (e) {
     el.style.opacity = 1; el._swClose();
     alert('Could not update: ' + e.message);
     return;
   }
   el.style.opacity = 1;
-  const gone = act === 'archive' || (act === 'unqueue' && ctx === 'queue');
-  if (gone) { el.remove(); if (ctx === 'queue') renderQueue(); else renderLibrary(); }
-  else if (ctx === 'library') renderLibrary();   // redraw so the tray flips Queue <-> Queued
+  el.remove();   // archive and remove both drop the row from whatever view this is
+  if (ctx.name === 'listDetail') renderListDetail(); else renderLibrary();
 }
+
+// ============================================================
+//  LISTS (root screen: Queue + the user's own lists)
+// ============================================================
+const ICON_LIST = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg>';
+const ICON_QUEUE = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>';
+
+function queueRowHtml() {
+  const n = listArticles('queue').length;
+  return `<div class="card" data-id="queue">
+    <div class="card-main" style="display:flex; align-items:center; gap:13px;">
+      <span class="list-ico">${ICON_QUEUE}</span>
+      <div style="flex:1; min-width:0;">
+        <div class="card-title">Queue</div>
+        <div class="card-meta">${n} article${n === 1 ? '' : 's'}</div>
+      </div>
+      <span class="pf-row-chev">›</span>
+    </div>
+  </div>`;
+}
+
+function listRowHtml(list) {
+  const n = listArticles(list.id).length;
+  return `<div class="card swipe" data-id="${escapeHtml(list.id)}">
+    <div class="sw-actions sw-right">
+      <button class="sw-btn act-rename" data-act="rename">Rename</button>
+      <button class="sw-btn act-delete" data-act="delete-list">Delete</button>
+    </div>
+    <div class="sw-content">
+      <span class="list-ico">${ICON_LIST}</span>
+      <div class="sw-body">
+        <div class="card-title">${escapeHtml(list.name)}</div>
+        <div class="card-meta">${n} article${n === 1 ? '' : 's'}</div>
+      </div>
+      <span class="pf-row-chev">›</span>
+    </div>
+  </div>`;
+}
+
+function renderLists() {
+  $('#listsRows').innerHTML = [queueRowHtml(), ...LISTS.map(listRowHtml)].join('');
+  $('#listsStatus').className = '';
+  $('#listsStatus').textContent = LISTS.length ? '' : 'Tap “＋ New List” to make your own.';
+  bindListRows();
+}
+
+function bindListRows() {
+  SWIPE_OPEN_ROW = null;   // DOM was just replaced
+  $('#listsRows').querySelectorAll('.card').forEach(el => {
+    const id = el.dataset.id;
+    const list = id === 'queue' ? { id: 'queue', name: 'Queue' }
+                                : LISTS.find(l => String(l.id) === id);
+    el.querySelector('.sw-body, .card-main').onclick = () => openList(list);
+    if (el.classList.contains('swipe')) {
+      attachSwipeRow(el);
+      el.querySelectorAll('.sw-btn').forEach(b =>
+        b.onclick = () => listRowAction(b.dataset.act, list, el));
+    }
+  });
+}
+
+async function listRowAction(act, list, el) {
+  if (act === 'rename') { el._swClose(); openListNameSheet(list); return; }
+  if (act !== 'delete-list') return;
+  if (!confirm(`Delete "${list.name}"? The articles stay in your Library.`)) { el._swClose(); return; }
+  el.style.opacity = .4;
+  try {
+    await apiJSON('DELETE', '/api/lists/' + list.id);
+  } catch (e) {
+    el.style.opacity = 1; el._swClose();
+    alert('Could not delete: ' + e.message);
+    return;
+  }
+  LISTS = LISTS.filter(l => String(l.id) !== String(list.id));
+  LIST_ITEMS = LIST_ITEMS.filter(r => String(r.list_id) !== String(list.id));
+  if (CUR_LIST && String(CUR_LIST.id) === String(list.id)) CUR_LIST = null;
+  renderLists();
+}
+
+$('#newListBtn').onclick = () => openListNameSheet(null);
 
 // Core: add a URL to the reading list. Returns the created article row (with title).
 // Shared by the "+ Add" sheet and the share-to-Tolkien landing handler.
@@ -1618,6 +1822,111 @@ $('#addUploadRow').onclick = () => {
 $('#addSubmit').onclick = addArticle;
 $('#addUrl').addEventListener('keydown', e => { if (e.key === 'Enter') addArticle(); });
 
+// --- "Add to…" picker: one shared sheet, opened from a Library swipe-right
+// and from the reader's header button, listing Queue + every custom list. ---
+function pickRowHtml(id, name, on) {
+  return `<div class="pf-row pick-row${on ? ' on' : ''}" data-list="${escapeHtml(String(id))}">
+    <span class="pf-row-label">${escapeHtml(name)}</span>
+    <span class="pick-check">${on ? '✓' : ''}</span>
+  </div>`;
+}
+
+function renderPickerRows() {
+  const it = PICK_ITEM;
+  if (!it) return;
+  const mine = new Set(LIST_ITEMS
+    .filter(r => String(r.article_id) === String(it.id)).map(r => String(r.list_id)));
+  $('#pickRows').innerHTML = [
+    pickRowHtml('queue', 'Queue', !!it.queued_at),
+    ...LISTS.map(l => pickRowHtml(l.id, l.name, mine.has(String(l.id)))),
+  ].join('');
+  $('#pickRows').querySelectorAll('.pick-row').forEach(el =>
+    el.onclick = () => togglePick(el.dataset.list));
+}
+
+async function togglePick(listId) {
+  const it = PICK_ITEM;
+  if (!it || $('#pickRows').dataset.busy) return;
+  const on = listId === 'queue'
+    ? !!it.queued_at
+    : LIST_ITEMS.some(r => String(r.list_id) === String(listId)
+                        && String(r.article_id) === String(it.id));
+  $('#pickRows').dataset.busy = '1';
+  try {
+    await setMembership(it, listId, !on);
+    renderPickerRows();
+    refreshAffectedViews();
+  } catch (e) {
+    alert('Could not update: ' + e.message);
+  } finally {
+    $('#pickRows').dataset.busy = '';
+  }
+}
+
+// Opened from the Library card's right-swipe tray and from the reader header.
+function openPicker(item) {
+  PICK_ITEM = item; PICK_RESUME = false;
+  renderPickerRows();                       // instant, from cache
+  openSheetEl($('#pickSheet'));
+  loadLists().then(() => {                  // self-correct if another device added one
+    if (PICK_ITEM === item && $('#pickSheet').classList.contains('open')) renderPickerRows();
+  }).catch(() => {});
+}
+
+$('#pickNewRow').onclick = () => {
+  PICK_RESUME = true;                       // come back to the picker after creating
+  closeSheets();
+  openListNameSheet(null);
+};
+$('#pickDone').onclick = closeSheets;
+
+// --- Create / rename a list: one sheet reused for both. ---
+function openListNameSheet(list) {
+  EDIT_LIST = list || null;
+  $('#listNameLabel').textContent = list ? 'Rename list' : 'New list';
+  $('#listName').value = list ? list.name : '';
+  $('#listNameErr').textContent = '';
+  $('#listNameSubmit').textContent = list ? 'Save' : 'Create list';
+  openSheetEl($('#listNameSheet'));
+  $('#listName').focus();
+}
+
+async function submitListName() {
+  const name = $('#listName').value.trim();
+  if (!name) return;
+  const btn = $('#listNameSubmit'), label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Saving…';
+  $('#listNameErr').textContent = '';
+  try {
+    if (EDIT_LIST) {
+      await apiJSON('PATCH', '/api/lists/' + EDIT_LIST.id, { name });
+      EDIT_LIST.name = name;
+      if (CUR_LIST && String(CUR_LIST.id) === String(EDIT_LIST.id)) {
+        CUR_LIST.name = name; $('#ldTitle').textContent = name;
+      }
+      closeSheets();
+      refreshAffectedViews();
+    } else {
+      const created = await apiJSON('POST', '/api/lists', { name });
+      LISTS.push(created);
+      closeSheets();
+      if (PICK_RESUME && PICK_ITEM) {
+        await setMembership(PICK_ITEM, created.id, true);   // new list starts checked
+        renderPickerRows();
+        openSheetEl($('#pickSheet'));
+      }
+      refreshAffectedViews();
+    }
+  } catch (e) {
+    $('#listNameErr').textContent = 'Error: ' + e.message;
+  } finally {
+    PICK_RESUME = false;
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+$('#listNameSubmit').onclick = submitListName;
+$('#listName').addEventListener('keydown', e => { if (e.key === 'Enter') submitListName(); });
+
 // Full teardown: actually end playback and release everything tied to it.
 // Call sites: the mini-player's ✕, sign-out, deleting the article/book that's
 // currently open, and opening a genuinely different item while another is loaded.
@@ -1652,7 +1961,7 @@ function minimizeReader() {
 $('#back').onclick = () => {
   minimizeReader();
   if (CUR_BACK === 'list') loadLibrary();   // refresh cards so the "% read" badge updates
-  else if (CUR_BACK === 'queue') loadLibrary().then(renderQueue);
+  else if (CUR_BACK === 'listDetail') loadLibrary().then(renderListDetail);
   showView(CUR_BACK || 'list');
 };
 
@@ -1881,6 +2190,7 @@ async function openArticle(item, seekChar) {
   MediaControls.setMeta();   // now-playing card = article title
   updateMiniPlayer();
   $('#contents').classList.add('hidden');   // articles have no chapter list
+  $('#addToList').classList.remove('hidden');
   HIGHLIGHTS = [];
   $('#status').className = '';
   $('#status').textContent = 'Extracting article…';
@@ -2279,6 +2589,7 @@ async function openChapter(chapter, chapters, idx, seekChar, opts = {}) {
   CHAPTERS = chapters || [];
   CUR_CH_IDX = idx || 0;
   $('#contents').classList.remove('hidden');   // reader gets a "Contents" button
+  $('#addToList').classList.add('hidden');     // lists are article-only
   saveBookLast();                               // remember this as the book's last spot
   HIGHLIGHTS = [];
   $('#status').className = ''; $('#status').textContent = 'Loading chapter…';
@@ -2427,6 +2738,14 @@ async function reconcileListen() {
 
 // --- Book search: find a line, jump straight to it ---
 $('#contents').onclick = () => { if (CHAPTERS.length) { minimizeReader(); showView('chapters'); } };
+$('#addToList').onclick = async () => {
+  if (CUR_TYPE !== 'article' || !CUR_ID) return;
+  const find = () => LIBRARY_ITEMS.find(x =>
+    x.kind === 'article' && String(x.id) === String(CUR_ID));
+  let it = find();
+  if (!it) { await loadLibrary(); it = find(); }   // e.g. opened from the Highlights screen
+  if (it) openPicker(it);
+};
 let _searchTimer = null;
 $('#chSearch').addEventListener('input', () => {
   clearTimeout(_searchTimer);
@@ -2667,11 +2986,12 @@ function enterApp() {
   $('#authView').style.display = 'none';
   if (USER) $('#acctEmail').textContent = USER.email || '';
   reconcileListen();   // pull + merge this account's listening history
-  if (_appStarted) { loadLibrary(); return; }   // refresh on re-entry (e.g. account switch)
+  if (_appStarted) { loadLibrary(); loadLists().catch(() => {}); return; }   // refresh on re-entry (e.g. account switch)
   _appStarted = true;
   MediaControls.init();
   showView('list');
   loadLibrary();
+  loadLists().catch(() => {});
   handleShare();
   setTimeout(() => $('#splash').classList.add('hide'), 400);
 }
