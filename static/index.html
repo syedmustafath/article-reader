@@ -163,13 +163,16 @@
                 bottom: calc(64px + env(safe-area-inset-bottom));
                 background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
                 display: flex; align-items: center; gap: 10px; padding: 8px 10px; cursor: pointer;
-                box-shadow: 0 6px 20px rgba(0,0,0,.14); }
+                box-shadow: 0 6px 20px rgba(0,0,0,.14); overflow: hidden; }
   .mp-cover { width: 40px; height: 40px; border-radius: 8px; background: var(--chip) center/cover; flex: none; }
+  .mp-cover .src-tile { width: 100%; height: 100%; border-radius: 8px; }
   .mp-title { flex: 1; font-size: 14px; font-weight: 600; overflow: hidden;
               text-overflow: ellipsis; white-space: nowrap; }
   .mp-btn { border: none; background: none; color: var(--ink); width: 34px; height: 34px; flex: none;
             display: flex; align-items: center; justify-content: center; padding: 0; }
   .mp-btn svg { width: 20px; height: 20px; }
+  .mp-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; }
+  .mp-progress-fill { height: 100%; width: 0%; background: var(--accent); }
 
   .pwrap { max-width: 780px; margin: 0 auto; }
   #seek { width: 100%; accent-color: var(--accent); height: 24px; display: block; }
@@ -699,6 +702,7 @@
   <div class="mp-title" id="mpTitle"></div>
   <button class="mp-btn" id="mpPlayPause" aria-label="Play or pause"></button>
   <button class="mp-btn" id="mpClose" aria-label="Stop">✕</button>
+  <div class="mp-progress"><div class="mp-progress-fill" id="mpProgressFill"></div></div>
 </div>
 <nav class="bottomnav" id="bottomNav">
   <button class="bn-tab" id="bnHome" data-view="home">
@@ -1239,6 +1243,14 @@ function updateMiniPlayer() {
   if (loaded) {
     $('#mpTitle').textContent = CUR_TITLE || '';
     $('#mpPlayPause').innerHTML = audio.paused ? ICON_PLAY : ICON_PAUSE;
+    if (CUR_TYPE === 'chapter') {
+      $('#mpCover').innerHTML = '';
+      $('#mpCover').style.backgroundImage = `url("${coverFor(CUR_ID, COVER, 80, 80)}")`;
+    } else {
+      $('#mpCover').style.backgroundImage = '';
+      $('#mpCover').innerHTML = sourceTileHtml({ url: CUR_URL, title: CUR_TITLE, id: CUR_ID });
+    }
+    $('#mpProgressFill').style.width = (articleFrac() * 100) + '%';
   }
 }
 $('#miniPlayer').addEventListener('click', e => {
@@ -2305,6 +2317,7 @@ audio.addEventListener('timeupdate', () => {
     $('#seek').value = frac * 1000;      // progress across the whole article
     updateTimeDisplay(frac);
   }
+  $('#mpProgressFill').style.width = (frac * 100) + '%';   // mini-player floatie's bar
   MediaControls.position();               // feed the lock-screen scrubber
   if (audio.currentTime > 0) _lastT = audio.currentTime;   // last-good pos for recovery
   // Accumulate real elapsed wall-clock while actually playing (timeupdate only
