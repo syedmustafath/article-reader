@@ -17,14 +17,14 @@
     --bg: #ffffff; --panel: #ffffff; --ink: #1a1a1c; --muted: #8a8a8f;
     --accent: #2417cc; --hl: #ffe08a; --hl-ink: #402c00; --line: #ececef;
     --chip: #f4f4f6; --sheet: #ffffff; --uhl: rgba(255, 208, 84, .55);
-    --brand: #2417cc;
+    --brand: #2417cc; --danger: #d0402a; --warn: #b26205;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #0f0f11; --panel: #17171a; --ink: #f1f1f3; --muted: #8e8e94;
       --accent: #6a5dff; --hl: #5a4413; --hl-ink: #ffe9b3; --line: #2a2a2e;
       --chip: #242428; --sheet: #1b1b1f; --uhl: rgba(255, 200, 70, .26);
-      --brand: #2417cc;
+      --brand: #2417cc; --danger: #e4553c; --warn: #d98324;
     }
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -53,7 +53,7 @@
   #readerView main { padding-bottom: 210px; }  /* reader keeps its own bottom stack (.player only) */
 
   /* List view */
-  #list { max-width: 720px; margin: 0 auto; }
+  #list, #queueList { max-width: 720px; margin: 0 auto; }
   .card { display: flex; align-items: stretch; border: 1px solid var(--line);
           border-radius: 14px; margin-bottom: 12px; background: var(--panel); overflow: hidden; }
   .card-thumb { width: 76px; flex: none; background-size: cover; background-position: center; }
@@ -63,10 +63,31 @@
   .card-meta { font-size: 13px; color: var(--muted); }
   .card .del { border: none; background: none; color: var(--muted); font-size: 24px;
                width: 46px; flex: none; }
-  #listStatus { color: var(--muted); text-align: center; padding: 44px 20px; font-size: 15px; }
-  #listStatus.err { color: #d0402a; }
+  #listStatus, #queueStatus { color: var(--muted); text-align: center; padding: 44px 20px; font-size: 15px; }
+  #listStatus.err, #queueStatus.err { color: #d0402a; }
   .libfilter { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin-bottom: 18px; }
   .libfilter button.sel { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
+
+  /* Article cards: source tile + iOS-style swipe-reveal actions */
+  .card.swipe { display: block; position: relative; -webkit-user-select: none; user-select: none; }
+  .sw-content { position: relative; z-index: 1; display: flex; align-items: center; gap: 13px;
+                padding: 13px 14px; background: var(--panel); touch-action: pan-y;
+                will-change: transform; }
+  .sw-actions { position: absolute; top: 0; bottom: 0; z-index: 0; display: flex; }
+  .sw-left  { left: 0; }
+  .sw-right { right: 0; }
+  .sw-btn { border: none; border-radius: 0; width: 86px; padding: 0; color: #fff;
+            font-size: 13px; font-weight: 650; }
+  .sw-btn.act-queue   { background: var(--accent); }
+  .sw-btn.act-unqueue { background: var(--muted); }
+  .sw-btn.act-archive { background: var(--warn); }
+  .sw-btn.act-delete  { background: var(--danger); }
+  .src-tile { position: relative; width: 52px; height: 52px; flex: none; border-radius: 12px;
+              overflow: hidden; display: flex; align-items: center; justify-content: center; }
+  .src-mono { font-size: 24px; font-weight: 800; color: #fff; line-height: 1; }
+  .src-fav { position: absolute; inset: 0; width: 100%; height: 100%;
+             object-fit: cover; background: #fff; }
+  .sw-body { flex: 1; min-width: 0; cursor: pointer; }
 
   /* Reader view */
   #hero { width: 100%; height: 160px; border-radius: 14px; margin: 4px 0 20px;
@@ -576,6 +597,19 @@
   </main>
 </div>
 
+<!-- ===== QUEUE VIEW ===== -->
+<div id="queueView" class="hidden">
+  <header>
+    <div class="bar">
+      <h1 class="app-title">Queue</h1>
+    </div>
+  </header>
+  <main>
+    <div id="queueList"></div>
+    <div id="queueStatus"></div>
+  </main>
+</div>
+
 <!-- ===== READER VIEW ===== -->
 <div id="readerView" class="hidden">
   <header>
@@ -628,6 +662,10 @@
   <button class="bn-tab" id="bnLibrary" data-view="list">
     <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h5v16H6a2 2 0 0 0-2 2V5z"/><path d="M20 5a2 2 0 0 0-2-2h-5v16h5a2 2 0 0 1 2 2V5z"/></svg>
     <span>Library</span>
+  </button>
+  <button class="bn-tab" id="bnQueue" data-view="queue">
+    <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>
+    <span>Queue</span>
   </button>
   <button class="bn-tab" id="bnAdd">
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -1103,13 +1141,15 @@ function showView(v) {
   $('#settingsView').classList.toggle('hidden', v !== 'settings');
   $('#stubView').classList.toggle('hidden', v !== 'stub');
   $('#statsView').classList.toggle('hidden', v !== 'stats');
+  $('#queueView').classList.toggle('hidden', v !== 'queue');
   updateMiniPlayer();
   updateBottomNav(v);
 }
 
 // --- Persistent mini-player + bottom tab nav (hidden while the reader itself is open) ---
 const TAB_FOR_VIEW = { list: 'bnLibrary', highlights: 'bnLibrary', chapters: 'bnLibrary',
-  profile: 'bnProfile', settings: 'bnProfile', stub: 'bnProfile', stats: 'bnProfile' };
+  profile: 'bnProfile', settings: 'bnProfile', stub: 'bnProfile', stats: 'bnProfile',
+  queue: 'bnQueue' };
 function updateBottomNav(v) {
   $('#bottomNav').classList.toggle('hidden', v === 'reader');
   document.querySelectorAll('.bn-tab').forEach(b =>
@@ -1131,6 +1171,11 @@ $('#miniPlayer').addEventListener('click', e => {
 $('#mpPlayPause').onclick = () => { if (audio.paused) doPlay(); else doPause(); };
 $('#mpClose').onclick = () => stopPlayback();
 $('#bnLibrary').onclick = () => { minimizeReader(); showView('list'); loadLibrary(); };
+$('#bnQueue').onclick = async () => {
+  minimizeReader(); showView('queue');
+  if (!LIBRARY_ITEMS.length) await loadLibrary();
+  renderQueue();
+};
 $('#bnProfile').onclick = () => { minimizeReader(); openProfile(); };
 
 // Direct JSON request for the fast highlight endpoints (Supabase ops are < 1s).
@@ -1248,27 +1293,182 @@ async function loadLibrary() {
   }
 }
 
+// --- Source icon: real favicon over a deterministic monogram fallback ---
+// Distinct from Placeholder/coverFor (generative contour art) — that stays for
+// book thumbs and the reader hero.
+const SRC_COLORS = ['#c2410c', '#b91c1c', '#a16207', '#15803d', '#0f766e',
+                    '#1d4ed8', '#6d28d9', '#be185d', '#475569', '#4d7c0f'];
+function srcDomain(item) {
+  let d = item.domain || '';
+  if (!d && item.url) { try { d = new URL(item.url).hostname; } catch (e) {} }
+  return d.replace(/^www\./, '');
+}
+function sourceTileHtml(item) {
+  const dom = srcDomain(item);
+  const seed = dom || String(item.id || '');
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (Math.imul(h, 31) + seed.charCodeAt(i)) >>> 0;
+  const color = SRC_COLORS[h % SRC_COLORS.length];
+  const letter = ((dom || item.title || '?').match(/[a-z0-9]/i) || ['?'])[0].toUpperCase();
+  const fav = dom
+    ? `<img class="src-fav" alt="" loading="lazy" onerror="this.remove()"
+            src="https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(dom)}">`
+    : '';
+  return `<div class="src-tile" style="background:${color}">
+    <span class="src-mono">${escapeHtml(letter)}</span>${fav}</div>`;
+}
+
+function relTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (mins < 1) return 'now';
+  if (mins < 60) return mins + 'm ago';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  const days = Math.floor(hrs / 24);
+  if (days <= 30) return days + 'd ago';
+  if (days < 365) return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return String(d.getFullYear());
+}
+
 function libraryCardHtml(item) {
-  const date = item.added_at
-    ? new Date(item.added_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
-  let meta;
-  if (item.kind === 'article') {
-    const p = loadProgress(item.id);
-    const read = p > 0.01 && p < 0.99 ? `${Math.round(p * 100)}% read` : '';
-    meta = [item.domain, date, item.est_minutes ? `~${item.est_minutes} min` : '', read]
-      .filter(Boolean).join(' · ');
-  } else {
-    meta = [item.author, (item.chapter_count || 0) + ' chapters'].filter(Boolean).join(' · ');
-  }
+  return item.kind === 'article' ? articleCardHtml(item, 'library') : bookCardHtml(item);
+}
+
+function bookCardHtml(item) {
+  const meta = [item.author, (item.chapter_count || 0) + ' chapters'].filter(Boolean).join(' · ');
   return `<div class="card" data-id="${escapeHtml(item.id)}">
     <div class="card-thumb" style="background-image:url('${coverFor(item.id, item.cover, 76, 76)}')"></div>
     <div class="card-main">
-      <div class="card-title">${escapeHtml(item.title || item.url || 'Untitled')}</div>
+      <div class="card-title">${escapeHtml(item.title || 'Untitled')}</div>
       <div class="card-meta">${escapeHtml(meta)}</div>
     </div>
     <button class="del" aria-label="Delete">×</button>
   </div>`;
 }
+
+// ctx: 'library' -> right-swipe Queue toggle, left-swipe Archive + Delete
+//      'queue'   -> left-swipe Remove from Queue only, no right-swipe layer
+function articleCardHtml(item, ctx) {
+  const p = loadProgress(item.id);
+  const read = p > 0.01 && p < 0.99 ? `${Math.round(p * 100)}% read` : '';
+  const meta = [srcDomain(item), relTime(item.added_at),
+                item.est_minutes ? `${item.est_minutes} min` : '', read]
+    .filter(Boolean).join(' · ');
+  let left = '';
+  if (ctx === 'library') {
+    left = item.queued_at
+      ? `<div class="sw-actions sw-left"><button class="sw-btn act-unqueue" data-act="unqueue">Queued</button></div>`
+      : `<div class="sw-actions sw-left"><button class="sw-btn act-queue" data-act="queue">＋ Queue</button></div>`;
+  }
+  const right = ctx === 'library'
+    ? `<div class="sw-actions sw-right">
+         <button class="sw-btn act-archive" data-act="archive">Archive</button>
+         <button class="sw-btn act-delete" data-act="delete">Delete</button>
+       </div>`
+    : `<div class="sw-actions sw-right">
+         <button class="sw-btn act-unqueue" data-act="unqueue">Remove</button>
+       </div>`;
+  return `<div class="card swipe" data-id="${escapeHtml(item.id)}">${left}${right}
+    <div class="sw-content">
+      ${sourceTileHtml(item)}
+      <div class="sw-body">
+        <div class="card-title">${escapeHtml(item.title || item.url || 'Untitled')}</div>
+        <div class="card-meta">${escapeHtml(meta)}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// --- Swipe-to-reveal rows (iOS style). One row open at a time. ---
+let SWIPE_OPEN_ROW = null;
+const SW_SLOP = 8;      // px of horizontal travel before we claim the gesture
+const SW_SNAP = 0.4;    // fraction of the action tray that snaps it open
+const SW_FLING = 0.5;   // px/ms release velocity that snaps open regardless
+
+function closeSwipeRows(except) {
+  if (SWIPE_OPEN_ROW && SWIPE_OPEN_ROW !== except) SWIPE_OPEN_ROW._swClose();
+}
+
+// rowEl: .card.swipe containing .sw-content and optional .sw-left / .sw-right trays.
+function attachSwipeRow(rowEl) {
+  const content = rowEl.querySelector('.sw-content');
+  const leftEl = rowEl.querySelector('.sw-left');
+  const rightEl = rowEl.querySelector('.sw-right');
+  let off = 0, x0 = 0, y0 = 0, lastX = 0, lastT = 0, start = 0;
+  let decided = false, dragging = false, suppressClick = false, pid = null;
+
+  const settle = to => {
+    off = to;
+    content.style.transition = 'transform .22s cubic-bezier(.2,.8,.2,1)';
+    content.style.transform = `translateX(${to}px)`;
+    if (to === 0) { if (SWIPE_OPEN_ROW === rowEl) SWIPE_OPEN_ROW = null; }
+    else SWIPE_OPEN_ROW = rowEl;
+  };
+  rowEl._swClose = () => settle(0);
+
+  content.addEventListener('pointerdown', e => {
+    if (!e.isPrimary || e.target.closest('.sw-btn')) return;
+    x0 = lastX = e.clientX; y0 = e.clientY; lastT = e.timeStamp;
+    start = off; decided = false; dragging = false; pid = e.pointerId;
+  });
+  content.addEventListener('pointermove', e => {
+    if (pid !== e.pointerId) return;
+    const dx = e.clientX - x0, dy = e.clientY - y0;
+    if (!decided) {
+      if (Math.abs(dx) > SW_SLOP && Math.abs(dx) > Math.abs(dy)) {
+        decided = dragging = true;
+        closeSwipeRows(rowEl);
+        content.setPointerCapture(pid);
+        content.style.transition = 'none';
+      } else if (Math.abs(dy) > SW_SLOP) { decided = true; pid = null; }   // vertical scroll: yield
+      return;
+    }
+    if (!dragging) return;
+    const maxL = leftEl ? leftEl.offsetWidth : 0, maxR = rightEl ? rightEl.offsetWidth : 0;
+    let v = start + dx;
+    if (v > maxL) v = maxL + (v - maxL) * 0.22;          // rubber band
+    if (v < -maxR) v = -maxR - (-maxR - v) * 0.22;
+    off = v;
+    content.style.transform = `translateX(${v}px)`;
+    lastX = e.clientX; lastT = e.timeStamp;
+  });
+  const end = e => {
+    if (pid !== e.pointerId) return;
+    pid = null;
+    if (!dragging) return;
+    dragging = false; suppressClick = true;
+    const vel = (e.clientX - lastX) / Math.max(1, e.timeStamp - lastT);
+    const maxL = leftEl ? leftEl.offsetWidth : 0, maxR = rightEl ? rightEl.offsetWidth : 0;
+    if (off < 0 && maxR && (-off > maxR * SW_SNAP || vel < -SW_FLING)) settle(-maxR);
+    else if (off > 0 && maxL && (off > maxL * SW_SNAP || vel > SW_FLING)) settle(maxL);
+    else settle(0);
+  };
+  content.addEventListener('pointerup', end);
+  content.addEventListener('pointercancel', end);
+
+  // Capture phase: swallow the click that immediately follows a drag (it must
+  // NOT re-close what the drag just opened), and separately make a later tap
+  // on an already-open row close it instead of opening the article.
+  content.addEventListener('click', e => {
+    if (suppressClick) {
+      e.stopPropagation(); e.preventDefault();
+      suppressClick = false;
+    } else if (off !== 0) {
+      e.stopPropagation(); e.preventDefault();
+      settle(0);
+    }
+  }, true);
+}
+
+// Outside tap / scroll closes the open row.
+document.addEventListener('pointerdown', e => {
+  if (SWIPE_OPEN_ROW && !e.target.closest('.card.swipe')) closeSwipeRows(null);
+}, true);
+window.addEventListener('scroll', () => { if (SWIPE_OPEN_ROW) closeSwipeRows(null); },
+                        { passive: true });
 
 const LIB_FILTERS = [['all', 'All'], ['article', 'Articles'], ['book', 'Books']];
 $('#libFilter').innerHTML = LIB_FILTERS.map(([f, label]) =>
@@ -1281,8 +1481,34 @@ $('#libFilter').addEventListener('click', e => {
   renderLibrary();
 });
 
+// Wires open/delete/swipe-action handlers for a rendered set of cards.
+function bindCards(container, items, ctx) {
+  SWIPE_OPEN_ROW = null;   // DOM was just replaced
+  container.querySelectorAll('.card').forEach(el => {
+    const item = items.find(x => String(x.id) === el.dataset.id);
+    el.querySelector('.sw-body, .card-main').onclick = () => {
+      if (item.kind === 'article') {
+        CUR_BACK = ctx === 'queue' ? 'queue' : 'list';
+        if (item.id === CUR_ID && CUR_TYPE === 'article') { showView('reader'); return; }   // already open — just expand
+        primeAudioForPlayback(); openArticle(item);
+      } else {
+        primeAudioForPlayback(); openBook(item);
+      }
+    };
+    const del = el.querySelector('.del');   // books only
+    if (del) del.onclick = () => deleteBook(el.dataset.id, el);
+    if (el.classList.contains('swipe')) {
+      attachSwipeRow(el);
+      el.querySelectorAll('.sw-btn').forEach(b =>
+        b.onclick = () => swipeAction(b.dataset.act, item, el, ctx));
+    }
+  });
+}
+
 function renderLibrary() {
-  const items = LIBRARY_ITEMS.filter(x => libraryFilter === 'all' || x.kind === libraryFilter);
+  const items = LIBRARY_ITEMS.filter(x =>
+    !(x.kind === 'article' && x.archived_at) &&
+    (libraryFilter === 'all' || x.kind === libraryFilter));
   if (!items.length) {
     $('#list').innerHTML = '';
     $('#listStatus').className = '';
@@ -1295,20 +1521,22 @@ function renderLibrary() {
   }
   $('#listStatus').textContent = '';
   $('#list').innerHTML = items.map(libraryCardHtml).join('');
-  $('#list').querySelectorAll('.card').forEach(el => {
-    const item = items.find(x => String(x.id) === el.dataset.id);
-    el.querySelector('.card-main').onclick = () => {
-      if (item.kind === 'article') {
-        CUR_BACK = 'list';
-        if (item.id === CUR_ID && CUR_TYPE === 'article') { showView('reader'); return; }   // already open — just expand
-        primeAudioForPlayback(); openArticle(item);
-      } else {
-        primeAudioForPlayback(); openBook(item);
-      }
-    };
-    el.querySelector('.del').onclick = () =>
-      item.kind === 'article' ? deleteArticle(el.dataset.id, el) : deleteBook(el.dataset.id, el);
-  });
+  bindCards($('#list'), items, 'library');
+}
+
+function renderQueue() {
+  const items = LIBRARY_ITEMS
+    .filter(x => x.kind === 'article' && x.queued_at && !x.archived_at)
+    .sort((a, b) => new Date(b.queued_at) - new Date(a.queued_at));
+  if (!items.length) {
+    $('#queueList').innerHTML = '';
+    $('#queueStatus').className = '';
+    $('#queueStatus').textContent = 'Nothing queued yet. Swipe right on an article in your Library to add it here.';
+    return;
+  }
+  $('#queueStatus').textContent = '';
+  $('#queueList').innerHTML = items.map(x => articleCardHtml(x, 'queue')).join('');
+  bindCards($('#queueList'), items, 'queue');
 }
 
 async function deleteArticle(id, el) {
@@ -1324,6 +1552,32 @@ async function deleteArticle(id, el) {
     el.style.opacity = 1;
     alert('Could not delete: ' + e.message);
   }
+}
+
+async function patchArticle(item, patch) {
+  const res = await apiJSON('PATCH', '/api/articles/' + item.id, patch);
+  if ('archived_at' in res) item.archived_at = res.archived_at;
+  if ('queued_at' in res) item.queued_at = res.queued_at;
+  return res;
+}
+
+// One handler for every swipe-tray button, in both Library and Queue.
+async function swipeAction(act, item, el, ctx) {
+  if (act === 'delete') { deleteArticle(String(item.id), el); return; }
+  el.style.opacity = .4;
+  try {
+    if (act === 'archive') await patchArticle(item, { archived: true });
+    else if (act === 'queue') await patchArticle(item, { queued: true });
+    else if (act === 'unqueue') await patchArticle(item, { queued: false });
+  } catch (e) {
+    el.style.opacity = 1; el._swClose();
+    alert('Could not update: ' + e.message);
+    return;
+  }
+  el.style.opacity = 1;
+  const gone = act === 'archive' || (act === 'unqueue' && ctx === 'queue');
+  if (gone) { el.remove(); if (ctx === 'queue') renderQueue(); else renderLibrary(); }
+  else if (ctx === 'library') renderLibrary();   // redraw so the tray flips Queue <-> Queued
 }
 
 // Core: add a URL to the reading list. Returns the created article row (with title).
@@ -1398,6 +1652,7 @@ function minimizeReader() {
 $('#back').onclick = () => {
   minimizeReader();
   if (CUR_BACK === 'list') loadLibrary();   // refresh cards so the "% read" badge updates
+  else if (CUR_BACK === 'queue') loadLibrary().then(renderQueue);
   showView(CUR_BACK || 'list');
 };
 
