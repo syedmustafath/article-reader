@@ -425,6 +425,39 @@
   .sv-dots { display: flex; justify-content: center; gap: 6px; margin-top: 12px; }
   .sv-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line); }
   .sv-dot.active { background: var(--accent); }
+
+  /* Home screen */
+  .hm-section { margin-bottom: 28px; }
+  .hm-section-title { font-size: 13px; font-weight: 700; color: var(--muted);
+                       text-transform: uppercase; letter-spacing: .03em; margin-bottom: 12px; }
+  .hm-row { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x proximity;
+            -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 2px; }
+  .hm-row::-webkit-scrollbar { display: none; }
+  .hm-tile { flex: none; width: 128px; scroll-snap-align: start; cursor: pointer; }
+  .hm-tile-thumb { width: 128px; height: 128px; border-radius: 14px; background-size: cover;
+                    background-position: center; overflow: hidden; margin-bottom: 8px; }
+  .hm-tile-thumb .src-tile { width: 128px; height: 128px; border-radius: 14px; }
+  .hm-tile-title { font-size: 13px; font-weight: 650; line-height: 1.3;
+                    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+                    overflow: hidden; }
+  .hm-tile-meta { font-size: 11px; color: var(--muted); margin-top: 2px;
+                   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hm-hero { display: block; border-radius: 16px; padding: 22px 20px; margin-bottom: 28px;
+             background: linear-gradient(135deg, var(--accent), #6a5dff);
+             color: #fff; text-decoration: none; }
+  .hm-hero-title { font-size: 19px; font-weight: 800; margin-bottom: 6px; }
+  .hm-hero-sub { font-size: 14px; opacity: .85; margin-bottom: 14px; line-height: 1.4; }
+  .hm-hero-cta { font-size: 14px; font-weight: 700; }
+  .hm-progress { display: flex; align-items: center; gap: 18px; background: var(--panel);
+                 border: 1px solid var(--line); border-radius: 14px; padding: 18px 16px;
+                 cursor: pointer; margin-bottom: 28px; }
+  .hm-progress-num { font-size: 32px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .hm-progress-label { font-size: 12px; color: var(--muted); text-transform: uppercase;
+                        letter-spacing: .03em; }
+  .hm-progress-streak { font-size: 14px; font-weight: 700; margin-top: 4px; }
+  .hm-spark { display: flex; align-items: flex-end; gap: 4px; height: 36px; flex: 1; }
+  .hm-spark-bar { flex: 1; background: var(--chip); border-radius: 3px 3px 1px 1px; min-height: 2px; }
+  .hm-spark-bar.today { background: var(--accent); }
 </style>
 </head>
 <body>
@@ -690,14 +723,36 @@
   </main>
 </div>
 
-<!-- ===== HOME VIEW (placeholder) ===== -->
+<!-- ===== HOME VIEW ===== -->
 <div id="homeView" class="hidden">
   <header>
     <div class="bar">
       <h1 class="app-title">Home</h1>
     </div>
   </header>
-  <main></main>
+  <main>
+    <div class="hm-section hidden" id="hmRecentSection">
+      <div class="hm-section-title">Jump back in</div>
+      <div class="hm-row" id="hmRecentRow"></div>
+    </div>
+    <div class="hm-section hidden" id="hmCuratedSection">
+      <div class="hm-section-title">Tolkien selects</div>
+      <div class="hm-row" id="hmCuratedRow"></div>
+    </div>
+    <a class="hm-hero" id="hmHero" href="#" target="_blank" rel="noopener">
+      <div class="hm-hero-title">Tips for becoming a better reader</div>
+      <div class="hm-hero-sub">Short reads from the Tolkien team on getting more out of listening.</div>
+      <div class="hm-hero-cta">Read the blog →</div>
+    </a>
+    <div class="hm-progress" id="hmProgress">
+      <div>
+        <div class="hm-progress-num" id="hmProgressNum">0</div>
+        <div class="hm-progress-label">min today</div>
+        <div class="hm-progress-streak" id="hmProgressStreak">🔥 0</div>
+      </div>
+      <div class="hm-spark" id="hmSpark"></div>
+    </div>
+  </main>
 </div>
 
 <!-- ===== READER VIEW ===== -->
@@ -1054,6 +1109,8 @@ let CUR_LIST = null;     // list open in the detail view: {id:'queue'|uuid, name
 let EDIT_LIST = null;    // list open in the name sheet (null = creating one)
 let PICK_ITEM = null;    // article the "Add to…" picker is currently open for
 let PICK_RESUME = false; // reopen the picker after creating a list from inside it
+const BLOG_URL = 'https://example.com/blog';   // PLACEHOLDER — point at the real Tolkien blog
+let CURATED_ARTICLES = [];  // cached curated picks: {id,url,title,cover,blurb,sort_order,added_at}
 
 // --- Reader display customization (theme, brightness, font, size, spacing, width) ---
 let BOOK_PAGE = 0;       // current page index within the open chapter (paged/book mode)
@@ -1403,7 +1460,7 @@ $('#bnLists').onclick = async () => {
   }
 };
 $('#bnProfile').onclick = () => { minimizeReader(); openProfile(); };
-$('#bnHome').onclick = () => { minimizeReader(); showView('home'); };
+$('#bnHome').onclick = () => { minimizeReader(); showView('home'); loadHome(); };
 
 // Direct JSON request for the fast highlight endpoints (Supabase ops are < 1s).
 async function apiJSON(method, url, body) {
@@ -2505,6 +2562,7 @@ async function openArticle(item, seekChar) {
     CHUNKS.forEach(releaseAudio);
     CHUNKS = data.chunks.map(c => ({ ...c, marks: null, audioUrl: null }));
     HIGHLIGHTS = hls || []; reanchorHighlights();
+    apiJSON('POST', '/api/articles/' + item.id + '/touch').catch(() => {});
     $('#title').textContent = item.title || data.title;
     $('#title').classList.remove('hidden');
     paintHero();
@@ -2848,6 +2906,7 @@ async function openBook(book) {
   try {
     const chapters = await apiJSON('GET', '/api/books/' + book.id + '/chapters');
     CHAPTERS = chapters;
+    apiJSON('POST', '/api/books/' + book.id + '/touch').catch(() => {});
     renderChapters(chapters);
     // Kindle-style: jump straight back into the last-read chapter (contents stay behind it)
     const last = loadBookLast(book.id);
@@ -3464,6 +3523,103 @@ $('#shareCopyBtn').onclick = async () => {
   catch (e) { input.select(); toast('Press ⌘/Ctrl+C to copy'); }
 };
 $('#pfShareRow').onclick = shareTolkien;
+
+// ============================================================
+//  HOME (jump back in + Tolkien selects + blog hero + daily progress)
+// ============================================================
+function homeTileHtml(item) {
+  const thumb = item.kind === 'book'
+    ? `<div class="hm-tile-thumb" style="background-image:url('${coverFor(item.id, item.cover, 128, 128)}')"></div>`
+    : `<div class="hm-tile-thumb">${sourceTileHtml(item)}</div>`;
+  const meta = item.kind === 'book' ? (item.author || '') : srcDomain(item);
+  return `<div class="hm-tile" data-id="${escapeHtml(item.id)}" data-kind="${item.kind}">
+    ${thumb}
+    <div class="hm-tile-title">${escapeHtml(item.title || item.url || 'Untitled')}</div>
+    <div class="hm-tile-meta">${escapeHtml(meta)}</div>
+  </div>`;
+}
+
+function renderHomeRecent() {
+  const items = LIBRARY_ITEMS
+    .filter(x => x.last_opened_at && !(x.kind === 'article' && x.archived_at))
+    .sort((a, b) => new Date(b.last_opened_at) - new Date(a.last_opened_at))
+    .slice(0, 10);
+  $('#hmRecentSection').classList.toggle('hidden', !items.length);
+  if (!items.length) return;
+  $('#hmRecentRow').innerHTML = items.map(homeTileHtml).join('');
+  $('#hmRecentRow').querySelectorAll('.hm-tile').forEach(el => {
+    const item = items.find(x => String(x.id) === el.dataset.id && x.kind === el.dataset.kind);
+    el.onclick = () => {
+      primeAudioForPlayback();
+      if (item.kind === 'article') openArticle(item); else openBook(item);
+    };
+  });
+}
+
+function curatedTileHtml(pick) {
+  return `<div class="hm-tile" data-id="${escapeHtml(pick.id)}">
+    <div class="hm-tile-thumb" style="background-image:url('${coverFor(pick.id, pick.cover, 128, 128)}')"></div>
+    <div class="hm-tile-title">${escapeHtml(pick.title || 'Untitled')}</div>
+    <div class="hm-tile-meta">${escapeHtml(pick.blurb || '')}</div>
+  </div>`;
+}
+
+// Tapping a curated pick reuses the exact same pipeline as pasting its URL
+// into "+ Add" yourself: addUrl() -> real library row -> open the reader.
+async function openCuratedPick(pick, el) {
+  if (el) { el.style.opacity = .5; el.style.pointerEvents = 'none'; }
+  primeAudioForPlayback();
+  try {
+    const created = await addUrl(pick.url);
+    await loadLibrary();
+    const item = LIBRARY_ITEMS.find(x => x.kind === 'article' && String(x.id) === String(created.id))
+      || { ...created, kind: 'article' };
+    openArticle(item);
+  } catch (e) {
+    alert('Could not open: ' + e.message);
+  } finally {
+    if (el) { el.style.opacity = 1; el.style.pointerEvents = ''; }
+  }
+}
+
+function renderHomeCurated() {
+  $('#hmCuratedSection').classList.toggle('hidden', !CURATED_ARTICLES.length);
+  if (!CURATED_ARTICLES.length) return;
+  $('#hmCuratedRow').innerHTML = CURATED_ARTICLES.map(curatedTileHtml).join('');
+  $('#hmCuratedRow').querySelectorAll('.hm-tile').forEach(el => {
+    const pick = CURATED_ARTICLES.find(x => String(x.id) === el.dataset.id);
+    el.onclick = () => openCuratedPick(pick, el);
+  });
+}
+
+// Compact visual variant of the Stats screen (renderStats/mondayOf/weekDayKeys)
+// — headline minutes + streak + a 7-bar sparkline, reusing LISTEN/computeStreak
+// as-is. Tap through to the full Stats screen.
+function renderHomeProgress() {
+  const keys = weekDayKeys(mondayOf(new Date()));
+  const vals = keys.map(k => LISTEN[k] || 0);
+  const maxSec = Math.max(...vals, 60);
+  $('#hmProgressNum').textContent = Math.round((LISTEN[todayKey()] || 0) / 60);
+  $('#hmProgressStreak').textContent = '🔥 ' + computeStreak();
+  $('#hmSpark').innerHTML = keys.map((k, i) => {
+    const pct = Math.max(6, Math.round((vals[i] / maxSec) * 100));
+    return `<div class="hm-spark-bar${k === todayKey() ? ' today' : ''}" style="height:${pct}%"></div>`;
+  }).join('');
+}
+$('#hmProgress').onclick = () => openStats();
+
+async function loadHome() {
+  $('#hmHero').href = BLOG_URL;
+  renderHomeProgress();                                  // instant, from local LISTEN cache
+  reconcileListen().then(renderHomeProgress).catch(() => {});
+  const recentP = (LIBRARY_ITEMS.length ? Promise.resolve() : loadLibrary())
+    .then(renderHomeRecent)
+    .catch(() => $('#hmRecentSection').classList.add('hidden'));
+  const curatedP = apiJSON('GET', '/api/curated')
+    .then(rows => { CURATED_ARTICLES = rows; renderHomeCurated(); })
+    .catch(() => $('#hmCuratedSection').classList.add('hidden'));
+  await Promise.all([recentP, curatedP]);
+}
 
 async function boot() {
   let cfg = {};
