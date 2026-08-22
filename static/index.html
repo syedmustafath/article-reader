@@ -78,6 +78,8 @@
   .sw-right { right: 0; }
   .sw-btn { border: none; border-radius: 0; width: 86px; padding: 0; color: #fff;
             font-size: 13px; font-weight: 650; }
+  #favBtn.on { color: #e0a72e; }
+  #favBtn.on svg { fill: currentColor; }
   .sw-btn.act-lists   { background: var(--accent); }
   .sw-btn.act-lists.on{ background: var(--muted); }
   .sw-btn.act-remove  { background: var(--muted); }
@@ -660,6 +662,7 @@
     <div class="bar">
       <button id="back" class="icon" aria-label="Back to list">‹</button>
       <div class="spacer"></div>
+      <button id="favBtn" class="icon hidden" aria-label="Favorite this article"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 2.7l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5-4.7-4.6 6.5-.9z"/></svg></button>
       <button id="addToList" class="icon hidden" aria-label="Add to lists"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M6 3h9a1 1 0 0 1 1 1v17l-5.5-3.2L5 21V4a1 1 0 0 1 1-1z"/><line x1="19" y1="4" x2="19" y2="10"/><line x1="16" y1="7" x2="22" y2="7"/></svg></button>
       <button id="contents" class="icon hidden" aria-label="Contents"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg></button>
       <button id="gear" class="icon" aria-label="Settings">⚙</button>
@@ -1635,12 +1638,17 @@ function renderLibrary() {
   bindCards($('#list'), items, { name: 'library' });
 }
 
-// listId: 'queue' (virtual, backed by queued_at) or a custom list's uuid.
+// listId: 'queue'/'favorites' (virtual, backed by queued_at/favorited_at) or a
+// custom list's uuid.
 function listArticles(listId) {
   if (listId === 'queue')
     return LIBRARY_ITEMS
       .filter(x => x.kind === 'article' && x.queued_at && !x.archived_at)
       .sort((a, b) => new Date(b.queued_at) - new Date(a.queued_at));
+  if (listId === 'favorites')
+    return LIBRARY_ITEMS
+      .filter(x => x.kind === 'article' && x.favorited_at && !x.archived_at)
+      .sort((a, b) => new Date(b.favorited_at) - new Date(a.favorited_at));
   return LIST_ITEMS
     .filter(r => String(r.list_id) === String(listId))
     .sort((a, b) => new Date(b.added_at) - new Date(a.added_at))
@@ -1667,6 +1675,8 @@ function renderListDetail() {
     $('#ldStatus').className = '';
     $('#ldStatus').textContent = CUR_LIST.id === 'queue'
       ? 'Nothing queued yet. Swipe right on an article in your Library to add it here.'
+      : CUR_LIST.id === 'favorites'
+      ? 'No favorites yet. Tap the star in an article to add it here.'
       : 'This list is empty. Swipe right on an article in your Library to add it here.';
     return;
   }
@@ -1696,14 +1706,16 @@ async function patchArticle(item, patch) {
   const res = await apiJSON('PATCH', '/api/articles/' + item.id, patch);
   if ('archived_at' in res) item.archived_at = res.archived_at;
   if ('queued_at' in res) item.queued_at = res.queued_at;
+  if ('favorited_at' in res) item.favorited_at = res.favorited_at;
   return res;
 }
 
-// listId 'queue' toggles the article's queued_at flag; any other id is a
-// custom list, backed by a real list_items row. Keeps LIST_ITEMS in sync
-// locally so every open view can redraw from cache with no refetch.
+// listId 'queue'/'favorites' toggles the article's queued_at/favorited_at flag;
+// any other id is a custom list, backed by a real list_items row. Keeps
+// LIST_ITEMS in sync locally so every open view can redraw from cache with no refetch.
 async function setMembership(item, listId, on) {
   if (listId === 'queue') { await patchArticle(item, { queued: on }); return; }
+  if (listId === 'favorites') { await patchArticle(item, { favorited: on }); return; }
   await apiJSON(on ? 'POST' : 'DELETE', '/api/lists/' + listId + '/items/' + item.id);
   LIST_ITEMS = LIST_ITEMS.filter(r =>
     !(String(r.list_id) === String(listId) && String(r.article_id) === String(item.id)));
@@ -1741,6 +1753,21 @@ async function swipeAction(act, item, el, ctx) {
 // ============================================================
 const ICON_LIST = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg>';
 const ICON_QUEUE = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>';
+const ICON_STAR = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 2.7l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5-4.7-4.6 6.5-.9z"/></svg>';
+
+function favoritesRowHtml() {
+  const n = listArticles('favorites').length;
+  return `<div class="card" data-id="favorites">
+    <div class="card-main" style="display:flex; align-items:center; gap:13px;">
+      <span class="list-ico">${ICON_STAR}</span>
+      <div style="flex:1; min-width:0;">
+        <div class="card-title">Favorites</div>
+        <div class="card-meta">${n} article${n === 1 ? '' : 's'}</div>
+      </div>
+      <span class="pf-row-chev">›</span>
+    </div>
+  </div>`;
+}
 
 function queueRowHtml() {
   const n = listArticles('queue').length;
@@ -1775,7 +1802,7 @@ function listRowHtml(list) {
 }
 
 function renderLists() {
-  $('#listsRows').innerHTML = [queueRowHtml(), ...LISTS.map(listRowHtml)].join('');
+  $('#listsRows').innerHTML = [queueRowHtml(), favoritesRowHtml(), ...LISTS.map(listRowHtml)].join('');
   $('#listsStatus').className = '';
   $('#listsStatus').textContent = LISTS.length ? '' : 'Tap “＋ New List” to make your own.';
   bindListRows();
@@ -1786,6 +1813,7 @@ function bindListRows() {
   $('#listsRows').querySelectorAll('.card').forEach(el => {
     const id = el.dataset.id;
     const list = id === 'queue' ? { id: 'queue', name: 'Queue' }
+               : id === 'favorites' ? { id: 'favorites', name: 'Favorites' }
                                 : LISTS.find(l => String(l.id) === id);
     el.querySelector('.sw-body, .card-main').onclick = () => openList(list);
     if (el.classList.contains('swipe')) {
@@ -2223,6 +2251,9 @@ async function openArticle(item, seekChar) {
   updateMiniPlayer();
   $('#contents').classList.add('hidden');   // articles have no chapter list
   $('#addToList').classList.remove('hidden');
+  $('#favBtn').classList.remove('hidden');
+  const libItem = LIBRARY_ITEMS.find(x => x.kind === 'article' && String(x.id) === String(item.id));
+  $('#favBtn').classList.toggle('on', !!(libItem || item).favorited_at);
   HIGHLIGHTS = [];
   $('#status').className = '';
   $('#status').textContent = 'Extracting article…';
@@ -2623,6 +2654,7 @@ async function openChapter(chapter, chapters, idx, seekChar, opts = {}) {
   CUR_CH_IDX = idx || 0;
   $('#contents').classList.remove('hidden');   // reader gets a "Contents" button
   $('#addToList').classList.add('hidden');     // lists are article-only
+  $('#favBtn').classList.add('hidden');        // favorites are article-only
   saveBookLast();                               // remember this as the book's last spot
   HIGHLIGHTS = [];
   $('#status').className = ''; $('#status').textContent = 'Loading chapter…';
@@ -2778,6 +2810,26 @@ $('#addToList').onclick = async () => {
   let it = find();
   if (!it) { await loadLibrary(); it = find(); }   // e.g. opened from the Highlights screen
   if (it) openPicker(it);
+};
+$('#favBtn').onclick = async () => {
+  if (CUR_TYPE !== 'article' || !CUR_ID || $('#favBtn').dataset.busy) return;
+  const find = () => LIBRARY_ITEMS.find(x =>
+    x.kind === 'article' && String(x.id) === String(CUR_ID));
+  let it = find();
+  if (!it) { await loadLibrary(); it = find(); }   // e.g. opened from the Highlights screen
+  if (!it) return;
+  const on = !it.favorited_at;
+  $('#favBtn').dataset.busy = '1';
+  $('#favBtn').classList.toggle('on', on);
+  try {
+    await patchArticle(it, { favorited: on });
+    refreshAffectedViews();
+  } catch (e) {
+    $('#favBtn').classList.toggle('on', !on);
+    alert('Could not update favorite: ' + e.message);
+  } finally {
+    $('#favBtn').dataset.busy = '';
+  }
 };
 let _searchTimer = null;
 $('#chSearch').addEventListener('input', () => {
