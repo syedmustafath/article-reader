@@ -117,6 +117,7 @@ class MoodsRequest(BaseModel):
 class ArticleUpdate(BaseModel):
     archived: Optional[bool] = None
     queued: Optional[bool] = None
+    favorited: Optional[bool] = None
 
 
 class ListRequest(BaseModel):
@@ -705,13 +706,15 @@ async def delete_article(article_id: str, user: dict = Depends(current_user)):
 @app.patch("/api/articles/{article_id}")
 async def update_article(article_id: str, req: ArticleUpdate,
                          user: dict = Depends(current_user)):
-    """Toggle the soft-hide (archive) and reading-queue flags on one article."""
+    """Toggle the soft-hide (archive), reading-queue, and favorite flags on one article."""
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     patch: dict = {}
     if req.archived is not None:
         patch["archived_at"] = now if req.archived else None
     if req.queued is not None:
         patch["queued_at"] = now if req.queued else None
+    if req.favorited is not None:
+        patch["favorited_at"] = now if req.favorited else None
     if not patch:
         raise HTTPException(400, "Nothing to update.")
     await _supabase("PATCH", f"/articles?id=eq.{article_id}&user_id=eq.{user['id']}",
