@@ -18,14 +18,29 @@
     --accent: #2417cc; --hl: #ffe08a; --hl-ink: #402c00; --line: #ececef;
     --chip: #f4f4f6; --sheet: #ffffff; --uhl: rgba(255, 208, 84, .55);
     --brand: #2417cc; --danger: #d0402a; --warn: #b26205;
+    /* Reader display customization (theme dark/light/system, brightness, font, size, spacing, width) */
+    --rd-font: Georgia, 'Times New Roman', serif;
+    --rd-size: 20px;
+    --rd-lh: 1.78;
+    --rd-track: 0em;
+    --rd-width: 720px;
+    --rd-dim: 0;
   }
+  /* System theme (no explicit override): follow OS, unless the user forced light */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --bg: #0f0f11; --panel: #17171a; --ink: #f1f1f3; --muted: #8e8e94;
       --accent: #6a5dff; --hl: #5a4413; --hl-ink: #ffe9b3; --line: #2a2a2e;
       --chip: #242428; --sheet: #1b1b1f; --uhl: rgba(255, 200, 70, .26);
       --brand: #2417cc; --danger: #e4553c; --warn: #d98324;
     }
+  }
+  /* Explicit dark override always wins, regardless of OS theme */
+  :root[data-theme="dark"] {
+    --bg: #0f0f11; --panel: #17171a; --ink: #f1f1f3; --muted: #8e8e94;
+    --accent: #6a5dff; --hl: #5a4413; --hl-ink: #ffe9b3; --line: #2a2a2e;
+    --chip: #242428; --sheet: #1b1b1f; --uhl: rgba(255, 200, 70, .26);
+    --brand: #2417cc; --danger: #e4553c; --warn: #d98324;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; background: var(--bg); color: var(--ink);
@@ -50,7 +65,10 @@
   .icon { width: 44px; padding: 0; height: 44px; font-size: 19px; flex: none;
           display: flex; align-items: center; justify-content: center; }
   main { max-width: 720px; margin: 0 auto; padding: 26px 20px 170px; }
-  #readerView main { padding-bottom: 210px; }  /* reader keeps its own bottom stack (.player only) */
+  #readerView main { padding-bottom: 210px; max-width: var(--rd-width); }  /* reader keeps its own bottom stack (.player only) + user-adjustable width */
+  /* Paged book mode: #pagerViewport already stops above the player (see sizePager()), so
+     the continuous-scroll reader's large bottom padding would only add unwanted scroll space. */
+  #readerView.book-paged main { padding-bottom: 12px; }
 
   /* List view */
   #list, #ldList, #listsRows { max-width: 720px; margin: 0 auto; }
@@ -105,13 +123,13 @@
   #back { font-size: 28px; line-height: 1; }
   #title { font-family: -apple-system, system-ui, sans-serif; font-size: 27px;
            font-weight: 800; line-height: 1.22; margin: 0 0 22px; letter-spacing: -.01em; }
-  #article { font-family: Georgia, 'Times New Roman', serif; font-size: 20px; line-height: 1.78; }
+  #article { font-family: var(--rd-font); font-size: var(--rd-size); line-height: var(--rd-lh); letter-spacing: var(--rd-track); }
   #article p { margin: 0 0 1.15em; }
-  /* Rich reading structure */
-  #article .a-h2 { font-size: 25px; line-height: 1.25; font-weight: 700; margin: 1.5em 0 .5em; letter-spacing: -.01em; }
-  #article .a-h3 { font-size: 21px; line-height: 1.3; font-weight: 700; margin: 1.35em 0 .45em; }
+  /* Rich reading structure — sizes scale with --rd-size (em), so only the base size is user-adjustable */
+  #article .a-h2 { font-size: 1.25em; line-height: 1.25; font-weight: 700; margin: 1.5em 0 .5em; letter-spacing: -.01em; }
+  #article .a-h3 { font-size: 1.05em; line-height: 1.3; font-weight: 700; margin: 1.35em 0 .45em; }
   #article .a-bq { margin: 1.2em 0; padding: .1em 0 .1em 1.1em; border-left: 3px solid var(--accent); color: var(--muted); font-style: italic; }
-  #article .a-pre { font-family: ui-monospace, Menlo, monospace; font-size: 15px; line-height: 1.6; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; white-space: pre-wrap; }
+  #article .a-pre { font-family: ui-monospace, Menlo, monospace; font-size: .75em; line-height: 1.6; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; white-space: pre-wrap; }
   #article .a-list { margin: 0 0 1.15em; padding-left: 1.4em; }
   #article ul.a-list { list-style: disc; }
   #article ol.a-list { list-style: decimal; }
@@ -137,6 +155,31 @@
   .compass.show { display: flex; }
   #status { color: var(--muted); font-size: 15px; padding: 40px 0; text-align: center; }
   #status.err { color: #d0402a; }
+
+  /* Book paged mode: #pagerViewport is a no-op wrapper in article/continuous-scroll mode */
+  #pagerViewport { display: contents; }
+  .book-paged #pagerViewport {
+    display: block; position: relative; overflow-x: auto; overflow-y: hidden;
+    scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .book-paged #pagerViewport::-webkit-scrollbar { display: none; }
+  .book-paged #article { column-gap: 32px; height: 100%; }   /* column-width is set in px by JS (layoutPager) — percentages aren't valid for it */
+  .book-paged .a-fig, .book-paged .a-pre,
+  .book-paged .a-h2, .book-paged .a-h3, .book-paged .a-bq { break-inside: avoid-column; }
+  /* Overlaid inside the (already player-clearing) pager box, not a layout sibling of it */
+  #pageIndicator { position: absolute; left: 0; right: 0; bottom: 6px; z-index: 2;
+                    text-align: center; color: var(--muted); font-size: 13px;
+                    font-variant-numeric: tabular-nums; pointer-events: none; display: none; }
+  .book-paged #pageIndicator { display: block; }
+  /* Tap zones for page-turn, scoped to the pager area only (not header/player) */
+  .pagebtn { position: absolute; top: 0; bottom: 0; z-index: 1; width: 15%; border: none;
+             background: none; padding: 0; display: none; }
+  .book-paged .pagebtn { display: block; }
+  #pagePrev { left: 0; } #pageNext { right: 0; }
+
+  /* Simulated screen dimming (real device brightness isn't accessible to a web page) */
+  .dimlayer { position: fixed; inset: 0; z-index: 14; background: #000; opacity: 0;
+              pointer-events: none; transition: opacity .15s; }
 
   .player { position: fixed; bottom: 0; left: 0; right: 0; background: var(--panel);
             border-top: 1px solid var(--line); padding: 12px 16px;
@@ -212,6 +255,7 @@
   #voice { width: 100%; padding: 13px; border: 1px solid var(--line); border-radius: 12px;
            background: var(--bg); color: var(--ink); font-size: 16px; }
   .speeds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+  .speeds.speeds-4 { grid-template-columns: repeat(4, 1fr); }
   .speeds button { font-variant-numeric: tabular-nums; padding: 13px 0; font-size: 15px; }
   .speeds button.sel { background: var(--accent); color: #fff; border-color: var(--accent);
                        font-weight: 700; }
@@ -662,6 +706,7 @@
       <div class="spacer"></div>
       <button id="addToList" class="icon hidden" aria-label="Add to lists"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M6 3h9a1 1 0 0 1 1 1v17l-5.5-3.2L5 21V4a1 1 0 0 1 1-1z"/><line x1="19" y1="4" x2="19" y2="10"/><line x1="16" y1="7" x2="22" y2="7"/></svg></button>
       <button id="contents" class="icon hidden" aria-label="Contents"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg></button>
+      <button id="displayBtn" class="icon" aria-label="Display settings" style="font-weight:700; font-size:16px;">Aa</button>
       <button id="gear" class="icon" aria-label="Settings">⚙</button>
     </div>
   </header>
@@ -669,7 +714,12 @@
     <div id="hero" class="hidden"></div>
     <h1 id="title" class="hidden"></h1>
     <div id="status"></div>
-    <div id="article"></div>
+    <div id="pagerViewport">
+      <div id="article"></div>
+      <button class="pagebtn" id="pagePrev" aria-label="Previous page"></button>
+      <button class="pagebtn" id="pageNext" aria-label="Next page"></button>
+      <div id="pageIndicator"></div>
+    </div>
   </main>
   <div class="player" id="player">
     <div class="pwrap">
@@ -693,6 +743,7 @@
   </div>
   <button class="compass" id="compass" aria-label="Scroll to the word being read">↓</button>
 </div>
+<div class="dimlayer" id="dimOverlay"></div>
 
 <audio id="audio"></audio>
 
@@ -834,6 +885,51 @@
   <button id="sheetDone" class="primary">Done</button>
 </div>
 
+<div class="sheet" id="displaySheet">
+  <div class="grab"></div>
+  <div class="field">
+    <div class="field-label">Theme</div>
+    <div class="speeds" id="rdTheme">
+      <button data-v="light">Light</button>
+      <button data-v="dark">Dark</button>
+      <button data-v="system">System</button>
+    </div>
+  </div>
+  <div class="field">
+    <div class="field-label">Brightness</div>
+    <input id="rdBrightness" type="range" min="0" max="100" value="0"
+           style="width:100%; accent-color:var(--accent);">
+  </div>
+  <div class="field">
+    <div class="field-label">Font</div>
+    <div id="rdFontRows" class="pick-rows"></div>
+  </div>
+  <div class="field">
+    <div class="field-label">Font size</div>
+    <input id="rdFontSize" type="range" min="15" max="28" step="1" value="20"
+           style="width:100%; accent-color:var(--accent);">
+  </div>
+  <div class="field">
+    <div class="field-label">Spacing</div>
+    <div class="speeds speeds-4" id="rdSpacing">
+      <button data-v="tight">Tight</button>
+      <button data-v="normal">Normal</button>
+      <button data-v="relaxed">Relaxed</button>
+      <button data-v="loose">Loose</button>
+    </div>
+  </div>
+  <div class="field">
+    <div class="field-label">Width</div>
+    <div class="speeds speeds-4" id="rdWidth">
+      <button data-v="narrow">Narrow</button>
+      <button data-v="medium">Medium</button>
+      <button data-v="wide">Wide</button>
+      <button data-v="full">Full</button>
+    </div>
+  </div>
+  <button id="displaySheetDone" class="primary">Done</button>
+</div>
+
 <script>
 const $ = s => document.querySelector(s);
 const audio = $('#audio');
@@ -955,6 +1051,35 @@ let CUR_LIST = null;     // list open in the detail view: {id:'queue'|uuid, name
 let EDIT_LIST = null;    // list open in the name sheet (null = creating one)
 let PICK_ITEM = null;    // article the "Add to…" picker is currently open for
 let PICK_RESUME = false; // reopen the picker after creating a list from inside it
+
+// --- Reader display customization (theme, brightness, font, size, spacing, width) ---
+let BOOK_PAGE = 0;       // current page index within the open chapter (paged/book mode)
+let BOOK_PAGES = 1;      // total pages in the current chapter's paginated layout
+const PAGE_GAP = 32;     // px gutter between columns/pages, must match the CSS column-gap
+const FONT_OPTIONS = {
+  georgia:  { label: 'Georgia',          css: "Georgia, 'Times New Roman', serif" },
+  palatino: { label: 'Palatino',         css: "'Palatino Linotype', Palatino, 'Book Antiqua', serif" },
+  times:    { label: 'Times New Roman',  css: "'Times New Roman', Times, serif" },
+  system:   { label: 'System Sans',      css: '-apple-system, system-ui, sans-serif' },
+  verdana:  { label: 'Verdana',          css: 'Verdana, Geneva, sans-serif' },
+};
+const SPACING_MAP = {
+  tight:   { lh: 1.5,  track: '0em' },
+  normal:  { lh: 1.78, track: '0em' },     // matches the app's original hardcoded default
+  relaxed: { lh: 2.0,  track: '.01em' },
+  loose:   { lh: 2.3,  track: '.02em' },
+};
+const WIDTH_MAP = { narrow: 560, medium: 720, wide: 900, full: 1100 };   // px; medium == original default
+const DEFAULT_READER_PREFS = {
+  theme: 'system', brightness: 0,
+  fontFamily: 'georgia', fontSize: 20,
+  spacing: 'normal', width: 'medium',
+};
+function loadReaderPrefs() {
+  try { return { ...DEFAULT_READER_PREFS, ...JSON.parse(localStorage.getItem('nvr_reader_prefs') || '{}') }; }
+  catch (e) { return { ...DEFAULT_READER_PREFS }; }
+}
+let READER_PREFS = loadReaderPrefs();
 
 const escapeHtml = s => String(s).replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1225,6 +1350,7 @@ function showView(v) {
   $('#homeView').classList.toggle('hidden', v !== 'home');
   updateMiniPlayer();
   updateBottomNav(v);
+  updateDimOverlay();
 }
 
 // --- Persistent mini-player + bottom tab nav (hidden while the reader itself is open) ---
@@ -1336,12 +1462,15 @@ function closeSheets() {
   $('#shareSheet').classList.remove('open');
   $('#pickSheet').classList.remove('open');
   $('#listNameSheet').classList.remove('open');
+  $('#displaySheet').classList.remove('open');
   $('#sheetBg').classList.remove('open');
 }
 $('#gear').onclick = () => openSheetEl($('#sheet'));
 $('#speedChip').onclick = () => openSheetEl($('#sheet'));
 $('#sheetBg').onclick = closeSheets;
 $('#sheetDone').onclick = closeSheets;
+$('#displayBtn').onclick = () => openSheetEl($('#displaySheet'));
+$('#displaySheetDone').onclick = closeSheets;
 
 // Reading-guide highlight toggle (persisted)
 $('#hlToggle').checked = highlightOn;
@@ -1369,6 +1498,105 @@ $('#musicVol').addEventListener('input', e => {
   try { localStorage.setItem('nvr_musicvol', e.target.value); } catch (err) {}
   MoodMusic.setVolume(musicVol);
 });
+
+// --- Reader display customization: theme / brightness / font / size / spacing / width ---
+function saveReaderPrefs() {
+  try { localStorage.setItem('nvr_reader_prefs', JSON.stringify(READER_PREFS)); } catch (e) {}
+}
+function updateDimOverlay() {
+  const inReader = !$('#readerView').classList.contains('hidden');
+  $('#dimOverlay').style.opacity = inReader ? (READER_PREFS.brightness / 100 * 0.72) : 0;
+}
+function applyReaderPrefs() {
+  const root = document.documentElement.style;
+  root.setProperty('--rd-font', FONT_OPTIONS[READER_PREFS.fontFamily].css);
+  root.setProperty('--rd-size', READER_PREFS.fontSize + 'px');
+  root.setProperty('--rd-lh', SPACING_MAP[READER_PREFS.spacing].lh);
+  root.setProperty('--rd-track', SPACING_MAP[READER_PREFS.spacing].track);
+  root.setProperty('--rd-width', WIDTH_MAP[READER_PREFS.width] + 'px');
+  if (READER_PREFS.theme === 'system') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = READER_PREFS.theme;
+  updateDimOverlay();
+  renderDisplaySheet();
+  if (isPagedMode()) layoutPager();   // font/size/spacing/width changes reflow page boundaries
+}
+function renderDisplaySheet() {
+  $('#rdTheme').querySelectorAll('button').forEach(b =>
+    b.classList.toggle('sel', b.dataset.v === READER_PREFS.theme));
+  $('#rdBrightness').value = READER_PREFS.brightness;
+  $('#rdFontRows').innerHTML = Object.entries(FONT_OPTIONS).map(([k, f]) => `
+    <div class="pf-row pick-row${k === READER_PREFS.fontFamily ? ' on' : ''}" data-font="${k}">
+      <span class="pf-row-label" style="font-family:${escapeHtml(f.css)}">${escapeHtml(f.label)}</span>
+      <span class="pick-check">${k === READER_PREFS.fontFamily ? '✓' : ''}</span>
+    </div>`).join('');
+  $('#rdFontSize').value = READER_PREFS.fontSize;
+  $('#rdSpacing').querySelectorAll('button').forEach(b =>
+    b.classList.toggle('sel', b.dataset.v === READER_PREFS.spacing));
+  $('#rdWidth').querySelectorAll('button').forEach(b =>
+    b.classList.toggle('sel', b.dataset.v === READER_PREFS.width));
+}
+$('#rdTheme').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  READER_PREFS.theme = b.dataset.v; saveReaderPrefs(); applyReaderPrefs();
+});
+$('#rdBrightness').addEventListener('input', e => {
+  READER_PREFS.brightness = +e.target.value; saveReaderPrefs(); applyReaderPrefs();
+});
+$('#rdFontRows').addEventListener('click', e => {
+  const row = e.target.closest('.pick-row'); if (!row) return;
+  READER_PREFS.fontFamily = row.dataset.font; saveReaderPrefs(); applyReaderPrefs();
+});
+$('#rdFontSize').addEventListener('input', e => {
+  READER_PREFS.fontSize = +e.target.value; saveReaderPrefs(); applyReaderPrefs();
+});
+$('#rdSpacing').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  READER_PREFS.spacing = b.dataset.v; saveReaderPrefs(); applyReaderPrefs();
+});
+$('#rdWidth').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  READER_PREFS.width = b.dataset.v; saveReaderPrefs(); applyReaderPrefs();
+});
+applyReaderPrefs();   // sync CSS vars / theme / sheet controls to the persisted prefs on load
+
+// --- Book paged mode: swipeable/tappable pages for EPUB chapters (articles keep continuous scroll) ---
+function isPagedMode() { return CUR_TYPE === 'chapter'; }
+function pagerStep() { return $('#pagerViewport').clientWidth + PAGE_GAP; }
+function sizePager() {
+  const pv = $('#pagerViewport');
+  if (!pv) return;
+  const top = pv.getBoundingClientRect().top;
+  const playerH = $('#player').classList.contains('on') ? $('#player').offsetHeight : 0;
+  pv.style.height = Math.max(200, window.innerHeight - top - playerH) + 'px';
+}
+function updatePageIndicator() {
+  $('#pageIndicator').textContent = isPagedMode() ? `Page ${BOOK_PAGE + 1} of ${BOOK_PAGES}` : '';
+}
+function goToPage(idx, animate = true) {
+  idx = Math.max(0, Math.min(BOOK_PAGES - 1, idx));
+  BOOK_PAGE = idx;
+  $('#pagerViewport').scrollTo({ left: idx * pagerStep(), behavior: animate ? 'smooth' : 'auto' });
+  updatePageIndicator();
+}
+function layoutPager() {
+  if (!isPagedMode()) return;
+  const pv = $('#pagerViewport'), art = $('#article');
+  art.style.columnWidth = pv.clientWidth + 'px';   // one column == one page's worth of width
+  const step = pagerStep();
+  BOOK_PAGES = Math.max(1, Math.round((art.scrollWidth + PAGE_GAP) / step));
+  BOOK_PAGE = Math.min(BOOK_PAGE, BOOK_PAGES - 1);
+  goToPage(BOOK_PAGE, false);
+}
+let _pagerScrollT = 0;
+$('#pagerViewport').addEventListener('scroll', () => {
+  if (!isPagedMode()) return;
+  clearTimeout(_pagerScrollT);
+  _pagerScrollT = setTimeout(() =>
+    goToPage(Math.round($('#pagerViewport').scrollLeft / pagerStep()), false), 90);
+}, { passive: true });
+window.addEventListener('resize', () => { if (isPagedMode()) { sizePager(); layoutPager(); } });
+$('#pagePrev').onclick = () => goToPage(BOOK_PAGE - 1);
+$('#pageNext').onclick = () => goToPage(BOOK_PAGE + 1);
 
 // ============================================================
 //  LIBRARY (articles + books, merged with an All/Articles/Books filter)
@@ -2111,6 +2339,7 @@ async function ensureChunk(i) {
     c.audioUrl = data.audio_url;
     c.marks = data.marks.map(m => ({ start: m.start + c.start, end: m.end + c.start, time: m.time }));
     renderArticle();
+    if (isPagedMode()) layoutPager();
     preloadAudio(c);
     return c;
   })();
@@ -2218,6 +2447,7 @@ async function openArticle(item, seekChar) {
   window.scrollTo(0, 0);
   genId++;
   CUR_TYPE = 'article';
+  $('#readerView').classList.remove('book-paged');   // articles are always continuous scroll
   CUR_ID = item.id; CUR_URL = item.url; CUR_TITLE = item.title;
   MediaControls.setMeta();   // now-playing card = article title
   updateMiniPlayer();
@@ -2270,7 +2500,9 @@ function clearActive() { if (spans[active]) spans[active].classList.remove('acti
 function updateCompass() {
   const sp = spans[active];
   const inReader = !$('#readerView').classList.contains('hidden');
-  if (!sp || !inReader || playing < 0) { $('#compass').classList.remove('show'); return; }
+  // Paged book mode is manual-only (narration keeps playing underneath regardless of the
+  // visible page), so the "scroll to the narrated word" affordance doesn't apply there.
+  if (isPagedMode() || !sp || !inReader || playing < 0) { $('#compass').classList.remove('show'); return; }
   const r = sp.getBoundingClientRect();
   if (r.bottom < 72) {                              // narrated word is above the viewport
     $('#compass').textContent = '↑'; $('#compass').classList.add('show');
@@ -2462,7 +2694,15 @@ function scrollToChar(ch) {
   const el = [...$('#article').querySelectorAll('[data-s]')]
     .reverse().find(s => +s.dataset.s <= ch);
   if (!el) return;
-  el.scrollIntoView({ block: 'center' });
+  if (isPagedMode()) {
+    // Multi-column layout isn't virtualized, so every [data-s] element's real geometry
+    // is always measurable — turn to the page containing it instead of scrolling.
+    const artLeft = $('#article').getBoundingClientRect().left;
+    const within = el.getBoundingClientRect().left - artLeft + $('#pagerViewport').scrollLeft;
+    goToPage(Math.floor(within / pagerStep()), false);
+  } else {
+    el.scrollIntoView({ block: 'center' });
+  }
   el.classList.add('flash');
   setTimeout(() => el.classList.remove('flash'), 1500);
 }
@@ -2616,6 +2856,7 @@ async function openChapter(chapter, chapters, idx, seekChar, opts = {}) {
   window.scrollTo(0, 0);
   genId++;
   CUR_TYPE = 'chapter';
+  $('#readerView').classList.add('book-paged');   // books use a swipeable page-change mechanism
   CUR_ID = chapter.id; CUR_URL = null; CUR_TITLE = chapter.title;
   MediaControls.setMeta();   // now-playing card = chapter title / book album
   updateMiniPlayer();
@@ -2647,6 +2888,7 @@ async function openChapter(chapter, chapters, idx, seekChar, opts = {}) {
     $('#status').textContent = '';
     renderArticle();
     $('#player').classList.add('on');
+    BOOK_PAGE = 0; sizePager(); layoutPager();
     updateTimeDisplay(0);
     if (seekChar != null) { seekToChar(seekChar); scrollToChar(seekChar); }
     else {
